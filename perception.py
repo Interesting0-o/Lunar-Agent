@@ -7,7 +7,7 @@ perception —— 感知节点工具集
 
 import json
 import logging
-import config
+from perception_prompt import PERCEPTION_SYSTEM_PROMPT
 from typing import Optional
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from model import model
@@ -54,7 +54,7 @@ def validate_perception_result(data: dict) -> bool:
 
 def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
     """调用感知模型并自动重试。全部失败返回 None，由调用方设置 error=True。"""
-    system_prompt = config.PERCEPTION_SYSTEM_PROMPT
+    system_prompt = PERCEPTION_SYSTEM_PROMPT
     max_attempts = cfg["max_retries"]
     emphases = cfg["retry_emphases"]
     last_error = None
@@ -69,7 +69,7 @@ def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
 
         try:
             raw = model.invoke(msgs)
-            text = raw.content.strip()
+            text = raw.content.strip()#type:ignore
 
             # 抹掉 ```json ... ``` 包裹
             if text.startswith("```"):

@@ -4,7 +4,8 @@ nodes —— LangGraph 图节点函数
 所有图节点实现在此，agent.py 只负责注册和连线。
 """
 
-import config
+from character_prompt import SYSTEM_PROMPT
+from config import PERCEPTION_CONFIG
 import logging
 from langchain.messages import SystemMessage
 from model import model
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 def inject_system_node(state: State) -> dict:
     """首次运行：注入角色系统提示词。"""
     return {
-        "messages": [SystemMessage(content=config.SYSTEM_PROMPT)],
+        "messages": [SystemMessage(content=SYSTEM_PROMPT)],
         "has_inject_system_prompt": True,
     }
 
@@ -28,7 +29,7 @@ def perception_node(state: State) -> dict:
 
     失败时设置 error=True，条件边据此引导到 END。
     """
-    cfg = config.PERCEPTION_CONFIG
+    cfg = PERCEPTION_CONFIG
     context = extract_recent_context(state["messages"], cfg["context_window"])
     result = call_perception_with_retry(context, cfg)
 
