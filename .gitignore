@@ -10,4 +10,5 @@ langgraph.json
 # Virtual environments
 .venv
 .langgraph_api
+.env
 
