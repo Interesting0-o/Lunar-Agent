@@ -16,7 +16,8 @@ from langchain.messages import SystemMessage
 from model import model
 from state import State
 from perception import extract_recent_context, call_perception_with_retry
-from state_engine import update_all, DEFAULT_TRAITS
+from state_engine import update_all
+from default_state import DEFAULT_TRAITS
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ def inject_system_node(state: State) -> dict:
 def perception_node(state: State) -> dict:
     """感知节点：分析用户输入的社交意义。
 
+    将 user_signals / user_interaction_impact 写入图 State，
+    state_engine_node 消费后会立即清理，避免 checkpoint 污染。
     失败时设置 error=True，条件边据此引导到 END。
     """
     cfg = PERCEPTION_CONFIG
@@ -64,8 +67,8 @@ def perception_node(state: State) -> dict:
 def state_engine_node(state: State) -> dict:
     """状态引擎节点：根据感知输出 + 当前状态 + Traits 更新所有状态层。
 
-    如果 perception 已标记 error，则跳过本轮状态更新。
-    triggered_events 仅用于日志，不写入 State。
+    读取 state 中的 user_signals / user_interaction_impact 后，
+    将其置为 None，避免中间数据在 checkpoint 中残留。
     """
     if state.get("error"):
         logger.info("state_engine 跳过本轮（perception 已标记 error）")
@@ -79,16 +82,14 @@ def state_engine_node(state: State) -> dict:
     result = update_all(
         current_internal=_ensure_array(state.get("internal_state")),
         current_relationship=_ensure_array(state.get("relationship_state")),
-        current_hidden=_ensure_array(state.get("hidden_state")),
         traits=traits,
         signals=signals,
         impact=impact,
     )
 
-    # triggered_events 仅日志，不返回给图（State 无此字段）
-    events = result.pop("triggered_events", [])
-    if events:
-        logger.info("State Engine 事件: %s", events)
+    # ── 消费后清理中间数据，不让它们留在 checkpoint 中 ──
+    result["user_signals"] = None
+    result["user_interaction_impact"] = None
 
     return result
 

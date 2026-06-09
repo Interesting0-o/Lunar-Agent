@@ -40,7 +40,7 @@ def route_after_start(state: State) -> str:
 
 
 def route_after_perception(state: State) -> str:
-    """感知成功 → 状态引擎 → LLM；感知失败 → 结束本轮。"""
+    """感知成功 → 状态引擎；感知失败 → 结束本轮。"""
     if state.get("error"):
         return "end"
     return "state_engine"
@@ -71,7 +71,7 @@ def tui_test():
     saver.setup()
 
 
-    
+
     check_graph = graph_builder.compile(saver)
 
     config =  {"configurable": {"thread_id": "useasdr_123"}}
@@ -107,7 +107,7 @@ def tui_test():
             test_data.pop("has_inject_system_prompt", None)
             res = check_graph.stream(test_data, config)
             is_inject_system = True
-        
+
         else:
             res = check_graph.stream({"messages":[HumanMessage(content=user_input)]}, config)
 
