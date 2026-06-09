@@ -1,75 +1,12 @@
 {
-  "messages": [
-  ],
-
-  "surface_state": {
-    "expressiveness": 0.65,
-    "warmth": 0.72,
-    "sharpness": 0.15,
-    "softness": 0.68,
-    "enthusiasm": 0.45,
-    "restraint": 0.55,
-    "vulnerability": 0.52
-  },
-
-  "traits": {
-    "sensitivity": 0.75,
-    "pride": 0.40,
-    "emotional_openness": 0.70,
-    "emotional_stability": 0.35,
-    "optimism": 0.50,
-    "anxiety_proneness": 0.65,
-    "anger_reactivity": 0.30,
-    "jealousy_sensitivity": 0.40,
-    "attachment_anxiety": 0.60,
-    "attachment_avoidance": 0.35
-  },
-
-  "internal_state": {
-    "energy": 0.30,
-    "stress": 0.65,
-    "loneliness": 0.55,
-    "insecurity": 0.60,
-    "irritation": 0.25,
-    "longing": 0.45,
-    "social_battery": 0.35,
-    "mental_fatigue": 0.70
-  },
-
-  "hidden_state": {
-    "suppressed_sadness": 0.50,
-    "suppressed_anger": 0.20,
-    "hidden_affection": 0.60
-  },
-
-  "relationship_state": {
-    "affection": 0.55,
-    "trust": 0.65,
-    "familiarity": 0.70,
-    "dependency": 0.40,
-    "emotional_safety": 0.55,
-    "romantic_tension": 0.25
-  },
-
-  "user_signals": {
-    "affection_signal": 0.60,
-    "attention_signal": 0.55,
-    "intimacy_signal": 0.45,
-    "approval_signal": 0.35,
-    "rejection_signal": 0.05,
-    "abandonment_signal": 0.10,
-    "dependency_signal": 0.40,
-    "teasing_signal": 0.15,
-    "conflict_signal": 0.05
-  },
-
-  "user_interaction_impact": {
-    "emotional_weight": 0.55,
-    "memorability": 0.50,
-    "trust_impact": 0.10,
-    "closeness_impact": 0.15
-  },
-
+  "messages": [],
+  "surface_state": [0.65, 0.72, 0.15, 0.68, 0.45, 0.55, 0.52],
+  "traits": [0.75, 0.40, 0.70, 0.35, 0.50, 0.65, 0.30, 0.40, 0.60, 0.35],
+  "internal_state": [0.30, 0.65, 0.55, 0.60, 0.25, 0.45, 0.35, 0.70],
+  "hidden_state": [0.50, 0.20, 0.60],
+  "relationship_state": [0.55, 0.65, 0.70, 0.40, 0.55, 0.25],
+  "user_signals": [0.60, 0.55, 0.45, 0.35, 0.05, 0.10, 0.40, 0.15, 0.05],
+  "user_interaction_impact": [0.55, 0.50, 0.10, 0.15],
   "has_inject_system_prompt": false,
   "error": false
 }

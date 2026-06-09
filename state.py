@@ -170,16 +170,58 @@ II_LABELS = [
 II_LABEL_IDX = {k: i for i, k in enumerate(II_LABELS)}
 
 # ═══════════════════════════════════════════════════════════════
+# StimulusSpace — 心理意义空间（7 维）
+# 由 Stimulus Construction Layer 从社交信号构造而来。
+# 社交信号 → 心理意义，是状态引擎理解的"心理语言"。
+# ═══════════════════════════════════════════════════════════════
+
+ST_ABANDONMENT = 0      # 被抛弃恐惧（rejection + abandonment 聚合）
+ST_VALIDATION = 1       # 被认可/被重视感
+ST_CLOSENESS = 2        # 亲密靠近/连接感
+ST_CONFLICT = 3         # 冲突/对抗张力
+ST_DEPENDENCY = 4       # 被依赖/被需要感
+ST_TEASING = 5          # 被逗弄/被调侃
+ST_EMOTIONAL_WEIGHT = 6 # 情绪冲击强度
+ST_SIZE = 7
+
+ST_LABELS = [
+    "abandonment_stimulus", "validation_stimulus", "closeness_stimulus",
+    "conflict_stimulus", "dependency_stimulus", "teasing_stimulus",
+    "emotional_weight_stimulus",
+]
+ST_LABEL_IDX = {k: i for i, k in enumerate(ST_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# GateVector — 门控向量（4 维）
+# 控制心理刺激在多大程度上能进入内部状态。
+# 每一维 [0,1]，0=完全关闭（刺激被阻挡），1=完全开放。
+# ═══════════════════════════════════════════════════════════════
+
+G_SUPPRESSION = 0   # 压抑门：1=压抑一切情绪进入（防御姿态）
+G_VULNERABILITY = 1 # 脆弱门：1=允许示弱/暴露脆弱
+G_ATTACHMENT = 2    # 依恋门：1=对依恋刺激敏感
+G_LEAKAGE = 3       # 泄漏门：1=压抑情绪泄漏到表面
+G_SIZE = 4
+
+G_LABELS = [
+    "suppression_gate", "vulnerability_gate",
+    "attachment_gate", "leakage_gate",
+]
+G_LABEL_IDX = {k: i for i, k in enumerate(G_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
 # 类型别名（保持导入兼容性）
 # ═══════════════════════════════════════════════════════════════
 
 InternalState = np.ndarray          # 8 维，用 I_* 索引
 RelationshipState = np.ndarray      # 6 维，用 R_* 索引
 HiddenState = np.ndarray            # 3 维，用 H_* 索引
-SurfaceState = np.ndarray           # 7 维，用 S_* 索引
+SurfaceState = np.ndarray           # 7 维，用 S_* 索引（动态投影，不存储）
 Traits = np.ndarray                 # 10 维，用 T_* 索引
 SocialSignals = np.ndarray          # 9 维，用 SS_* 索引
 InteractionImpact = np.ndarray      # 4 维，用 II_* 索引
+StimulusVector = np.ndarray         # 7 维，用 ST_* 索引
+GateVector = np.ndarray             # 4 维，用 G_* 索引
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数：键值对字典 → numpy 数组

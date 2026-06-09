@@ -2,8 +2,13 @@
 nodes —— LangGraph 图节点函数
 
 所有图节点实现在此，agent.py 只负责注册和连线。
+
+注意：state 中存储的 np.ndarray 在通过 JSON 序列化/反序列化
+（如 test.json 加载、SQLite checkpoint 恢复）后可能变为 Python list，
+所有 node 函数在读取 state 时负责确保类型正确。
 """
 
+import numpy as np
 from character_prompt import SYSTEM_PROMPT
 from config import PERCEPTION_CONFIG
 import logging
@@ -14,6 +19,15 @@ from perception import extract_recent_context, call_perception_with_retry
 from state_engine import update_all, DEFAULT_TRAITS
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_array(v, dtype=np.float64) -> np.ndarray:
+    """确保值为 numpy 数组（兼容 Python list/json 反序列化）。"""
+    if v is None:
+        return None
+    if isinstance(v, np.ndarray):
+        return v
+    return np.asarray(v, dtype=dtype)
 
 
 def inject_system_node(state: State) -> dict:
@@ -57,13 +71,18 @@ def state_engine_node(state: State) -> dict:
         logger.info("state_engine 跳过本轮（perception 已标记 error）")
         return {}
 
+    # ── 确保所有数值状态为 numpy 数组（兼容 json/list 反序列化） ──
+    traits = _ensure_array(state.get("traits"))
+    signals = _ensure_array(state.get("user_signals"))
+    impact = _ensure_array(state.get("user_interaction_impact"))
+
     result = update_all(
-        current_internal=state.get("internal_state"),
-        current_relationship=state.get("relationship_state"),
-        current_hidden=state.get("hidden_state"),
-        traits=state["traits"],
-        signals=state["user_signals"],#type: ignore
-        impact=state["user_interaction_impact"],#type: ignore
+        current_internal=_ensure_array(state.get("internal_state")),
+        current_relationship=_ensure_array(state.get("relationship_state")),
+        current_hidden=_ensure_array(state.get("hidden_state")),
+        traits=traits,
+        signals=signals,
+        impact=impact,
     )
 
     # triggered_events 仅日志，不返回给图（State 无此字段）
