@@ -58,8 +58,8 @@ def state_engine_node(state: State) -> dict:
         current_relationship=state.get("relationship_state"),
         current_hidden=state.get("hidden_state"),
         traits=state["traits"],
-        signals=state["user_signals"],
-        impact=state["user_interaction_impact"],
+        signals=state["user_signals"],#type: ignore
+        impact=state["user_interaction_impact"],#type: ignore
     )
 
     # triggered_events 仅日志，不返回给图（State 无此字段）

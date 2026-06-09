@@ -1,17 +1,5 @@
 {
   "messages": [
-    {
-      "role": "user",
-      "content": "你今天感觉怎么样？"
-    },
-    {
-      "role": "assistant",
-      "content": "还不错，谢谢关心。不过有点累。"
-    },
-    {
-      "role": "user",
-      "content": "怎么了？遇到什么问题了吗？"
-    }
   ],
 
   "surface_state": {
