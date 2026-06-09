@@ -9,10 +9,11 @@
 - Traits:          核心特质（长期稳定的性格参数）
 - InternalState:   内部状态（底层心理指标）
 - RelationshipState: 关系状态（对用户的互动感知）
-- HiddenState:     隐藏状态（压抑或未被表达的情感）
 - SocialSignals:   社交信号（从用户输入中提取的客观社交线索）
 - InteractionImpact: 互动影响指标（本轮交互对关系层面的冲击）
 - State:           顶层状态聚合（保留 TypedDict）
+
+注意：隐藏状态层（HiddenState）已移除，相关"里表情"职责合并至 Surface 与 Gate 层。
 """
 
 import numpy as np
@@ -106,20 +107,8 @@ R_LABELS = [
 ]
 R_LABEL_IDX = {k: i for i, k in enumerate(R_LABELS)}
 
-# ═══════════════════════════════════════════════════════════════
-# HiddenState — 隐藏状态（3 维）
-# 被压抑或未直接表达的情感，积累到阈值会触发"情绪突破"。
-# ═══════════════════════════════════════════════════════════════
 
-H_SUPPRESSED_SADNESS = 0   # 压抑的悲伤（0=无, 1=满溢）
-H_SUPPRESSED_ANGER = 1     # 压抑的愤怒（0=无, 1=满溢）
-H_HIDDEN_AFFECTION = 2     # 隐藏的好感（0=无, 1=满溢）
-H_SIZE = 3
-
-H_LABELS = [
-    "suppressed_sadness", "suppressed_anger", "hidden_affection",
-]
-H_LABEL_IDX = {k: i for i, k in enumerate(H_LABELS)}
+# ── HiddenState 已移除，相关"里表情"职责合并至 Surface 与 Gate 层 ──
 
 # ═══════════════════════════════════════════════════════════════
 # SocialSignals — 社交信号（9 维）
@@ -215,7 +204,6 @@ G_LABEL_IDX = {k: i for i, k in enumerate(G_LABELS)}
 
 InternalState = np.ndarray          # 8 维，用 I_* 索引
 RelationshipState = np.ndarray      # 6 维，用 R_* 索引
-HiddenState = np.ndarray            # 3 维，用 H_* 索引
 SurfaceState = np.ndarray           # 7 维，用 S_* 索引（动态投影，不存储）
 Traits = np.ndarray                 # 10 维，用 T_* 索引
 SocialSignals = np.ndarray          # 9 维，用 SS_* 索引
@@ -257,10 +245,6 @@ def relationship_from_dict(d: dict) -> np.ndarray:
     return _dict_to_array(d, R_LABEL_IDX, R_SIZE)
 
 
-def hidden_from_dict(d: dict) -> np.ndarray:
-    return _dict_to_array(d, H_LABEL_IDX, H_SIZE)
-
-
 def signals_from_dict(d: dict) -> np.ndarray:
     """将 user_signals 的键值对字典转换为 9 维 SocialSignals 数组。"""
     return _dict_to_array(d, SS_LABEL_IDX, SS_SIZE)
@@ -285,12 +269,10 @@ class State(TypedDict):
     traits: np.ndarray
 
     internal_state: Optional[np.ndarray]
-    hidden_state: Optional[np.ndarray]
     relationship_state: Optional[np.ndarray]
 
-    # ── 感知节点的输出（本轮用户输入的社交分析） ──
-    user_signals: Optional[np.ndarray]
-    user_interaction_impact: Optional[np.ndarray]
+    # ── 感知节点输出（每轮清理，不持久化残留） ──
+    # perception_node 写入，state_engine_node 消费后置为 None
 
     # ── 系统标记 ──
     has_inject_system_prompt: bool
