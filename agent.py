@@ -63,8 +63,49 @@ graph_builder.add_edge("llm", END)
 
 compiled_graph = graph_builder.compile()
 
-
-if __name__ == "__main__":
-    connection = sqlite3.connect("./db/luna.db", check_same_thread=False)
+def tui_test():
+    import json
+    from langchain.messages import HumanMessage
+    connection = sqlite3.connect("./db/lunar.db", check_same_thread=False)
     saver = SqliteSaver(connection)
     saver.setup()
+
+
+
+    check_graph = graph_builder.compile(saver)
+
+    config =  {"configurable": {"thread_id": "user_123"}}
+
+    state = check_graph.get_state(config)
+
+    print(state)
+
+    with open("test.json", "r") as f:
+        test_data = json.load(f)
+
+    is_inject_system = False
+
+    while True:
+        print("[User]:",end ="")
+        user_input =input()
+        print()
+
+        if user_input in ["quit", "exit","q"]:
+            break
+
+        if is_inject_system:
+            test_data["messages"].append(HumanMessage(content=user_input))
+            res = check_graph.stream(test_data, config)
+            is_inject_system = False
+        
+        else:
+            res = check_graph.stream({"messages":[HumanMessage(content=user_input)]}, config)
+
+        print("[Lunar]:",end="")
+        for chunk in res:
+            print(chunk,end="")
+
+
+if __name__ == "__main__":
+
+    tui_test()
