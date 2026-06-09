@@ -74,7 +74,7 @@ def tui_test():
     
     check_graph = graph_builder.compile(saver)
 
-    config =  {"configurable": {"thread_id": "user_123"}}
+    config =  {"configurable": {"thread_id": "useasdr_123"}}
 
     state = check_graph.get_state(config)
     print(state)
