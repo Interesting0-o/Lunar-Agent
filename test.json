@@ -70,6 +70,6 @@
     "closeness_impact": 0.15
   },
 
-  "has_inject_system_prompt": true,
+  "has_inject_system_prompt": false,
   "error": false
 }

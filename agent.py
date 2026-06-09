@@ -71,19 +71,26 @@ def tui_test():
     saver.setup()
 
 
-
+    
     check_graph = graph_builder.compile(saver)
 
     config =  {"configurable": {"thread_id": "user_123"}}
 
     state = check_graph.get_state(config)
-
     print(state)
-
     with open("test.json", "r") as f:
         test_data = json.load(f)
 
     is_inject_system = False
+
+    # 打印已有对话历史
+    if state and state.values:
+        for msg in state.values.get("messages", []):
+            if hasattr(msg, "type") and hasattr(msg, "content"):
+                if msg.type == "human":
+                    print(f"[User]: {msg.content}")
+                elif msg.type == "ai":
+                    print(f"[Lunar]: {msg.content}")
 
     while True:
         print("[User]:",end ="")
@@ -93,17 +100,26 @@ def tui_test():
         if user_input in ["quit", "exit","q"]:
             break
 
-        if is_inject_system:
+        if not is_inject_system:
             test_data["messages"].append(HumanMessage(content=user_input))
+            # 移除 has_inject_system_prompt 让 router 走 inject_system_node
+            # （否则首跳跳过注入角色 system prompt → LLM 无角色上下文 → 性格崩坏）
+            test_data.pop("has_inject_system_prompt", None)
             res = check_graph.stream(test_data, config)
-            is_inject_system = False
+            is_inject_system = True
         
         else:
             res = check_graph.stream({"messages":[HumanMessage(content=user_input)]}, config)
 
-        print("[Lunar]:",end="")
+        print("[Lunar]:", end="")
         for chunk in res:
-            print(chunk,end="")
+            if isinstance(chunk, dict):
+                for val in chunk.values():
+                    if isinstance(val, dict):
+                        for msg in val.get('messages', []):
+                            if hasattr(msg, 'type') and msg.type == 'ai':
+                                print(msg.content, end="")
+        print()
 
 
 if __name__ == "__main__":

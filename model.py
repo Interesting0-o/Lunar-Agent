@@ -11,3 +11,10 @@ model = init_chat_model(
     base_url="http://localhost:11434",
     api_key="",
 )
+
+perception_model = init_chat_model(
+    model="qwen2.5:7b",
+    model_provider="ollama",
+    base_url="http://localhost:11434",
+    api_key="",
+)

@@ -241,18 +241,18 @@ def _apply_signal_rules(
 
         # 基础影响
         for dim, weight in dim_rules.items():
-            old_val = result.get(dim, 0.5)
+            old_val = result[dim]
             result[dim] = clamp(old_val + strength * weight)
 
         # 特质二次修饰
         for trait_name, affected_signals in trait_amps.items():
             if signal_key in affected_signals:
-                trait_deviation = traits.get(trait_name, 0.5) - 0.5
+                trait_deviation = traits[trait_name] - 0.5
                 amp_factor = affected_signals[signal_key]
                 extra = strength * trait_deviation * amp_factor
                 if extra != 0.0:
                     for dim, weight in dim_rules.items():
-                        result[dim] = clamp(result.get(dim, 0.5) + extra * weight)
+                        result[dim] = clamp(result[dim] + extra * weight)
 
     return result
 

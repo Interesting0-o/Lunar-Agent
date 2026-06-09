@@ -1,6 +1,10 @@
 """Lunar 人格状态的类型定义。
 
-本模块定义了对话式 AI 人格的所有状态维度，按层次分为：
+所有纯 float 参数的 TypedDict 已替换为 numpy 数组。
+每个数组的维度索引由对应的命名常量定义（如 I_ENERGY、T_PRIDE 等），
+取值见各维度的 LABELS 列表和 LABEL_IDX 映射。
+
+层级划分：
 - SurfaceState:    表面状态（即时可感知的表达特征）
 - Traits:          核心特质（长期稳定的性格参数）
 - InternalState:   内部状态（底层心理指标）
@@ -8,146 +12,244 @@
 - HiddenState:     隐藏状态（压抑或未被表达的情感）
 - SocialSignals:   社交信号（从用户输入中提取的客观社交线索）
 - InteractionImpact: 互动影响指标（本轮交互对关系层面的冲击）
-- State:           顶层状态聚合
+- State:           顶层状态聚合（保留 TypedDict）
 """
 
-from typing import TypedDict, List, Optional, Annotated
+import numpy as np
+from typing import List, Optional, Annotated,TypedDict
 from langgraph.graph.message import add_messages
 
 
-class SurfaceState(TypedDict):
-    """表面状态 —— 对外呈现的表达特征，直接影响语言风格。
+# ═══════════════════════════════════════════════════════════════
+# SurfaceState — 表面状态（7 维）
+# 对外呈现的表达特征，直接影响语言风格。
+# 由 State Engine 根据内部状态与 Traits 计算得出。
+# ═══════════════════════════════════════════════════════════════
 
-    这些维度描述 AI 在"此刻"说话时的情绪外显方式。
-    由 State Engine 根据内部状态与 Traits 计算得出，是"角色想表现出来的样子"。
+S_EXPRESSIVENESS = 0   # 情绪外露程度（0=内敛, 1=奔放）
+S_WARMTH = 1           # 语气温度（0=冰冷, 1=温暖）
+S_SHARPNESS = 2        # 攻击性/尖锐感（0=温和, 1=尖锐）
+S_SOFTNESS = 3         # 柔和度（0=生硬, 1=柔软）
+S_ENTHUSIASM = 4       # 活力/热情（0=低沉, 1=高涨）
+S_RESTRAINT = 5        # 克制程度（0=直白, 1=克制）
+S_VULNERABILITY = 6    # 脆弱感（0=坚强, 1=脆弱）
+S_SIZE = 7
+
+S_LABELS = [
+    "expressiveness", "warmth", "sharpness",
+    "softness", "enthusiasm", "restraint", "vulnerability",
+]
+S_LABEL_IDX = {k: i for i, k in enumerate(S_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# Traits — 核心特质（10 维）
+# 长期稳定的性格参数，随时间缓慢演化。
+# 分三组：基础性格、负面倾向、依恋模式。
+# ═══════════════════════════════════════════════════════════════
+
+T_SENSITIVITY = 0           # 敏感度（0=迟钝, 1=敏感）
+T_PRIDE = 1                 # 自尊心（0=自卑, 1=高傲）
+T_EMOTIONAL_OPENNESS = 2    # 情绪开放性（0=封闭, 1=敞开）
+T_EMOTIONAL_STABILITY = 3   # 情绪稳定性（0=波动, 1=稳定）
+T_OPTIMISM = 4              # 乐观倾向（0=悲观, 1=乐观）
+T_ANXIETY_PRONENESS = 5     # 焦虑倾向（0=松弛, 1=易焦虑）
+T_ANGER_REACTIVITY = 6      # 易怒倾向（0=平和, 1=易怒）
+T_JEALOUSY_SENSITIVITY = 7  # 嫉妒敏感度（0=不在意, 1=易嫉妒）
+T_ATTACHMENT_ANXIETY = 8    # 依恋焦虑（0=安全, 1=害怕被抛弃）
+T_ATTACHMENT_AVOIDANCE = 9  # 依恋回避（0=亲近, 1=疏离）
+T_SIZE = 10
+
+T_LABELS = [
+    "sensitivity", "pride", "emotional_openness", "emotional_stability", "optimism",
+    "anxiety_proneness", "anger_reactivity", "jealousy_sensitivity",
+    "attachment_anxiety", "attachment_avoidance",
+]
+T_LABEL_IDX = {k: i for i, k in enumerate(T_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# InternalState — 内部状态（8 维）
+# 底层心理指标，受对话事件影响而变化。
+# ═══════════════════════════════════════════════════════════════
+
+I_ENERGY = 0            # 精力/能量（0=耗尽, 1=充沛）
+I_STRESS = 1            # 压力（0=放松, 1=高压）
+I_LONELINESS = 2        # 孤独感（0=充实, 1=孤独）
+I_INSECURITY = 3        # 不安全感（0=自信, 1=不安）
+I_IRRITATION = 4        # 烦躁程度（0=平静, 1=烦躁）
+I_LONGING = 5           # 渴望/思念（0=淡然, 1=强烈渴望）
+I_SOCIAL_BATTERY = 6    # 社交电量（0=耗尽, 1=满电）
+I_MENTAL_FATIGUE = 7    # 精神疲劳（0=清醒, 1=疲惫）
+I_SIZE = 8
+
+I_LABELS = [
+    "energy", "stress", "loneliness", "insecurity",
+    "irritation", "longing", "social_battery", "mental_fatigue",
+]
+I_LABEL_IDX = {k: i for i, k in enumerate(I_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# RelationshipState — 关系状态（6 维）
+# AI 与用户之间的互动累积感知。
+# ═══════════════════════════════════════════════════════════════
+
+R_AFFECTION = 0            # 好感度（0=冷淡, 1=喜爱）
+R_TRUST = 1                # 信任度（0=怀疑, 1=信任）
+R_FAMILIARITY = 2          # 熟悉度（0=陌生, 1=亲密）
+R_DEPENDENCY = 3           # 情感依赖（0=独立, 1=依赖）
+R_EMOTIONAL_SAFETY = 4     # 情感安全感（0=不安, 1=安全）
+R_ROMANTIC_TENSION = 5     # 浪漫张力（0=无感, 1=强烈）
+R_SIZE = 6
+
+R_LABELS = [
+    "affection", "trust", "familiarity",
+    "dependency", "emotional_safety", "romantic_tension",
+]
+R_LABEL_IDX = {k: i for i, k in enumerate(R_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# HiddenState — 隐藏状态（3 维）
+# 被压抑或未直接表达的情感，积累到阈值会触发"情绪突破"。
+# ═══════════════════════════════════════════════════════════════
+
+H_SUPPRESSED_SADNESS = 0   # 压抑的悲伤（0=无, 1=满溢）
+H_SUPPRESSED_ANGER = 1     # 压抑的愤怒（0=无, 1=满溢）
+H_HIDDEN_AFFECTION = 2     # 隐藏的好感（0=无, 1=满溢）
+H_SIZE = 3
+
+H_LABELS = [
+    "suppressed_sadness", "suppressed_anger", "hidden_affection",
+]
+H_LABEL_IDX = {k: i for i, k in enumerate(H_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# SocialSignals — 社交信号（9 维）
+# 从用户本轮输入中提取的客观社交线索，perception_node 的核心输出。
+# 各维度表示"用户话语中携带了多强的该种社交信号"（0~1）。
+# 所有维度独立，可以同时高。
+# ═══════════════════════════════════════════════════════════════
+
+# ── 正向关系信号 ──
+SS_AFFECTION = 0        # 好感/喜爱信号
+SS_ATTENTION = 1        # 关注/被注意需求
+SS_INTIMACY = 2         # 亲密靠近信号
+SS_APPROVAL = 3         # 寻求认可/表扬
+
+# ── 负向/回避信号 ──
+SS_REJECTION = 4        # 排斥/推开信号
+SS_ABANDONMENT = 5      # "会离开我吗"测试信号
+
+# ── 依赖/张力信号 ──
+SS_DEPENDENCY = 6       # 依赖/需要信号
+SS_TEASING = 7          # 逗弄/调戏信号
+SS_CONFLICT = 8         # 冲突/对抗信号
+SS_SIZE = 9
+
+SS_LABELS = [
+    "affection_signal", "attention_signal", "intimacy_signal", "approval_signal",
+    "rejection_signal", "abandonment_signal",
+    "dependency_signal", "teasing_signal", "conflict_signal",
+]
+SS_LABEL_IDX = {k: i for i, k in enumerate(SS_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# InteractionImpact — 互动影响指标（4 维）
+# 本轮交互对关系层面的潜在冲击评估。
+# emotional_weight / memorability 为 [0,1]；
+# trust_impact / closeness_impact 为 [-1,1]。
+# ═══════════════════════════════════════════════════════════════
+
+II_EMOTIONAL_WEIGHT = 0  # 情绪重量（0=日常闲聊, 0.5=重要, 1=关系转折）
+II_MEMORABILITY = 1      # 可记忆程度（0=过眼云烟, 0.5=值得记住, 1=刻骨铭心）
+II_TRUST_IMPACT = 2      # 对信任的影响（-1=严重破坏, 0=无, 1=极大增强）
+II_CLOSENESS_IMPACT = 3  # 对亲密感的影响（-1=严重疏远, 0=无, 1=极大拉近）
+II_SIZE = 4
+
+II_LABELS = [
+    "emotional_weight", "memorability", "trust_impact", "closeness_impact",
+]
+II_LABEL_IDX = {k: i for i, k in enumerate(II_LABELS)}
+
+# ═══════════════════════════════════════════════════════════════
+# 类型别名（保持导入兼容性）
+# ═══════════════════════════════════════════════════════════════
+
+InternalState = np.ndarray          # 8 维，用 I_* 索引
+RelationshipState = np.ndarray      # 6 维，用 R_* 索引
+HiddenState = np.ndarray            # 3 维，用 H_* 索引
+SurfaceState = np.ndarray           # 7 维，用 S_* 索引
+Traits = np.ndarray                 # 10 维，用 T_* 索引
+SocialSignals = np.ndarray          # 9 维，用 SS_* 索引
+InteractionImpact = np.ndarray      # 4 维，用 II_* 索引
+
+# ═══════════════════════════════════════════════════════════════
+# 工具函数：键值对字典 → numpy 数组
+# ═══════════════════════════════════════════════════════════════
+
+
+def _dict_to_array(d: dict, label_idx: dict, size: int) -> np.ndarray:
+    """将键值对字典转换为对应长度的 numpy 数组。
+
+    缺失的键对应维度值为 0.0，多余的键被忽略。
     """
-    expressiveness: float   # 情绪外露程度 (0=内敛, 1=奔放)
-    warmth: float           # 语气温度 (0=冰冷, 1=温暖)
-    sharpness: float        # 攻击性/尖锐感 (0=温和, 1=尖锐)
-    softness: float         # 柔和度 (0=生硬, 1=柔软)
-    enthusiasm: float       # 活力/热情 (0=低沉, 1=高涨)
-    restraint: float        # 克制程度 (0=直白, 1=克制)
-    vulnerability: float    # 脆弱感 (0=坚强, 1=脆弱)
+    arr = np.zeros(size, dtype=np.float64)
+    for k, v in d.items():
+        idx = label_idx.get(k)
+        if idx is not None:
+            arr[idx] = v
+    return arr
 
 
-class Traits(TypedDict):
-    """核心特质 —— 长期稳定的性格参数，随时间缓慢演化。
-
-    分为三组：基础性格、负面倾向、依恋模式。
-    这部分是角色的"本性"，短时间对话中几乎不变。
-    """
-    # ---- 基础性格 ----
-    sensitivity: float          # 敏感度 (0=迟钝, 1=敏感)
-    pride: float                # 自尊心 (0=自卑, 1=高傲)
-    emotional_openness: float   # 情绪开放性 (0=封闭, 1=敞开)
-    emotional_stability: float  # 情绪稳定性 (0=波动, 1=稳定)
-    optimism: float             # 乐观倾向 (0=悲观, 1=乐观)
-
-    # ---- 负面倾向 ----
-    anxiety_proneness: float    # 焦虑倾向 (0=松弛, 1=易焦虑)
-    anger_reactivity: float     # 易怒倾向 (0=平和, 1=易怒)
-    jealousy_sensitivity: float # 嫉妒敏感度 (0=不在意, 1=易嫉妒)
-
-    # ---- 依恋模式 (Attachment) ----
-    attachment_anxiety: float   # 依恋焦虑 (0=安全, 1=害怕被抛弃)
-    attachment_avoidance: float # 依恋回避 (0=亲近, 1=疏离)
+def surface_from_dict(d: dict) -> np.ndarray:
+    return _dict_to_array(d, S_LABEL_IDX, S_SIZE)
 
 
-class InternalState(TypedDict):
-    """内部状态 —— 底层心理指标，受对话事件影响而变化。
-
-    反映 AI 当前的心理能量水平和情绪负荷。
-    每次交互后由 State Engine 根据社交信号 + 当前状态 + Traits 更新。
-    """
-    energy: float           # 精力/能量 (0=耗尽, 1=充沛)
-    stress: float           # 压力 (0=放松, 1=高压)
-    loneliness: float       # 孤独感 (0=充实, 1=孤独)
-    insecurity: float       # 不安全感 (0=自信, 1=不安)
-    irritation: float       # 烦躁程度 (0=平静, 1=烦躁)
-    longing: float          # 渴望/思念 (0=淡然, 1=强烈渴望)
-
-    social_battery: float   # 社交电量 (0=耗尽, 1=满电)
-    mental_fatigue: float   # 精神疲劳 (0=清醒, 1=疲惫)
+def traits_from_dict(d: dict) -> np.ndarray:
+    return _dict_to_array(d, T_LABEL_IDX, T_SIZE)
 
 
-class RelationshipState(TypedDict):
-    """关系状态 —— 描述 AI 与用户之间的互动累积感知。
-
-    这些维度反映关系层面的长期积累，由多次交互的 InteractionImpact 叠加而成。
-    """
-    affection: float            # 好感度 (0=冷淡, 1=喜爱)
-    trust: float                # 信任度 (0=怀疑, 1=信任)
-    familiarity: float          # 熟悉度 (0=陌生, 1=亲密)
-    dependency: float           # 情感依赖 (0=独立, 1=依赖)
-    emotional_safety: float     # 情感安全感 (0=不安, 1=安全)
-    romantic_tension: float     # 浪漫张力 (0=无感, 1=强烈)
+def internal_from_dict(d: dict) -> np.ndarray:
+    return _dict_to_array(d, I_LABEL_IDX, I_SIZE)
 
 
-class HiddenState(TypedDict):
-    """隐藏状态 —— 被压抑或未直接表达的情感。
-
-    这些维度影响表面状态的变化但不会直接显露。
-    当某一维度积累到阈值时，可能导致"情绪突破"。
-    """
-    suppressed_sadness: float   # 压抑的悲伤 (0=无, 1=满溢)
-    suppressed_anger: float     # 压抑的愤怒 (0=无, 1=满溢)
-    hidden_affection: float     # 隐藏的好感 (0=无, 1=满溢)
+def relationship_from_dict(d: dict) -> np.ndarray:
+    return _dict_to_array(d, R_LABEL_IDX, R_SIZE)
 
 
-class SocialSignals(TypedDict):
-    """社交信号 —— 从用户本轮输入中提取的客观社交线索。
-
-    这是 perception_node 的核心输出。
-    各维度表示"用户话语中携带了多强的该种社交信号"(0~1)。
-    值越高，说明该社交意图越强烈/明显。
-    所有维度独立，可以同时高（如既表达好感又带有逗弄）。
-    """
-    # ── 正向关系信号 ──
-    affection_signal: float     # 好感/喜爱信号 (0=无, 1=强烈)
-    attention_signal: float     # 关注/被注意需求 (0=无, 1=强烈)
-    intimacy_signal: float      # 亲密靠近信号 (0=无, 1=强烈)
-    approval_signal: float      # 寻求认可/表扬 (0=无, 1=强烈)
-
-    # ── 负向/回避信号 ──
-    rejection_signal: float     # 排斥/推开信号 (0=无, 1=强烈)
-    abandonment_signal: float   # "会离开我吗"测试信号 (0=无, 1=强烈)
-
-    # ── 依赖/张力信号 ──
-    dependency_signal: float    # 依赖/需要信号 (0=无, 1=强烈)
-    teasing_signal: float       # 逗弄/调戏信号 (0=无, 1=强烈)
-    conflict_signal: float      # 冲突/对抗信号 (0=无, 1=强烈)
+def hidden_from_dict(d: dict) -> np.ndarray:
+    return _dict_to_array(d, H_LABEL_IDX, H_SIZE)
 
 
-class InteractionImpact(TypedDict):
-    """互动影响指标 —— 本轮交互对关系层面的潜在冲击评估。
+def signals_from_dict(d: dict) -> np.ndarray:
+    """将 user_signals 的键值对字典转换为 9 维 SocialSignals 数组。"""
+    return _dict_to_array(d, SS_LABEL_IDX, SS_SIZE)
 
-    由 perception_node 估算，后续被 State Engine 用于更新 RelationshipState 等。
-    emotional_weight / memorability 为 [0,1]，值越高越重要。
-    trust_impact / closeness_impact 为 [-1,1]，负值表示削弱/恶化。
-    """
-    emotional_weight: float     # 情绪重量 (0=日常闲聊, 0.5=重要对话, 1=关系转折点)
-    memorability: float         # 可记忆程度 (0=过眼云烟, 0.5=值得记住, 1=刻骨铭心)
 
-    trust_impact: float         # 对信任的影响 (-1=严重破坏, 0=无影响, 1=极大增强)
-    closeness_impact: float     # 对亲密感的影响 (-1=严重疏远, 0=无影响, 1=极大拉近)
+def impact_from_dict(d: dict) -> np.ndarray:
+    """将 user_interaction_impact 的键值对字典转换为 4 维 InteractionImpact 数组。"""
+    return _dict_to_array(d, II_LABEL_IDX, II_SIZE)
+
+
+# ═══════════════════════════════════════════════════════════════
+# State — 顶层状态聚合（保留 TypedDict）
+# ═══════════════════════════════════════════════════════════════
 
 
 class State(TypedDict):
-    """顶层状态 —— 聚合所有子状态，作为图节点的消息传递载体。"""
+    """顶层状态——聚合所有子状态，作为图节点的消息传递载体。"""
     messages: Annotated[List, add_messages]
 
     # ── 角色自身的内部状态（所有层级） ──
-    surface_state: Optional[SurfaceState]
-    traits: Traits
+    surface_state: Optional[np.ndarray]
+    traits: np.ndarray
 
-    internal_state: Optional[InternalState]
-    hidden_state: Optional[HiddenState]
-    relationship_state: Optional[RelationshipState]
+    internal_state: Optional[np.ndarray]
+    hidden_state: Optional[np.ndarray]
+    relationship_state: Optional[np.ndarray]
 
     # ── 感知节点的输出（本轮用户输入的社交分析） ──
-    user_signals: Optional[SocialSignals]
-    user_interaction_impact: Optional[InteractionImpact]
+    user_signals: Optional[np.ndarray]
+    user_interaction_impact: Optional[np.ndarray]
 
     # ── 系统标记 ──
-    has_inject_system_prompt: bool  # 是否已注入系统提示词
-    error: bool                     # 感知节点执行失败时设为 True，条件边据此引导到 END
+    has_inject_system_prompt: bool
+    error: bool

@@ -11,17 +11,21 @@ from langchain.messages import SystemMessage
 from model import model
 from state import State
 from perception import extract_recent_context, call_perception_with_retry
-from state_engine import update_all
+from state_engine import update_all, DEFAULT_TRAITS
 
 logger = logging.getLogger(__name__)
 
 
 def inject_system_node(state: State) -> dict:
-    """首次运行：注入角色系统提示词。"""
-    return {
+    """首次运行：注入角色系统提示词 + 默认人格特质（如果状态中还没有）。"""
+    result = {
         "messages": [SystemMessage(content=SYSTEM_PROMPT)],
         "has_inject_system_prompt": True,
     }
+    # 如果 state 已有 traits（来自 test.json），不覆盖
+    if not state.get("traits"):
+        result["traits"] = DEFAULT_TRAITS
+    return result
 
 
 def perception_node(state: State) -> dict:
