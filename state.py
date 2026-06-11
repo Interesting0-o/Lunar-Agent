@@ -17,8 +17,35 @@
 """
 
 import numpy as np
-from typing import List, Optional, Annotated,TypedDict
+from typing import TYPE_CHECKING, List, Optional, Annotated, TypedDict
 from langgraph.graph.message import add_messages
+
+
+# ── Pydantic schema 兼容性 ──
+# langgraph dev / Studio 会使用 Pydantic 为 State TypedDict 生成 JSON Schema，
+# 但 numpy.ndarray 不是 Pydantic v2 原生支持的类型。
+# 这里提供一个兼容类型：类型检查器看到的是 np.ndarray，
+# Pydantic 看到的是 list[float]（用于 schema 生成），运行时值为 numpy 数组。
+if TYPE_CHECKING:
+    _Array = np.ndarray
+else:
+    try:
+        from pydantic_core import core_schema as _cs
+
+        class _PydanticArray:
+            """Pydantic 兼容的 np.ndarray 占位类型，用于 TypedDict 字段标注。
+
+            告诉 Pydantic 将数组字段视为 list[float] 以生成 schema，
+            运行时实际值仍然是 numpy ndarray。
+            """
+            __slots__ = ()
+            @classmethod
+            def __get_pydantic_core_schema__(cls, _source_type, _handler):
+                return _cs.list_schema(_cs.float_schema())
+
+        _Array = _PydanticArray
+    except ImportError:
+        _Array = np.ndarray
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -249,15 +276,15 @@ class State(TypedDict):
     messages: Annotated[List, add_messages]
 
     # ── 角色自身的内部状态（所有层级） ──
-    surface_state: Optional[np.ndarray]
-    traits: np.ndarray
+    surface_state: Optional[_Array]
+    traits: _Array
 
-    internal_state: Optional[np.ndarray]
-    relationship_state: Optional[np.ndarray]
+    internal_state: Optional[_Array]
+    relationship_state: Optional[_Array]
 
     # ── 感知节点输出（perception_node 写入，state_engine_node 消费后置为 None） ──
-    user_signals: Optional[np.ndarray]
-    user_interaction_impact: Optional[np.ndarray]
+    user_signals: Optional[_Array]
+    user_interaction_impact: Optional[_Array]
 
     # ── 状态格式化输出（state_formatter_node 写入，llm_node 消费） ──
     state_description: Optional[str]

@@ -455,16 +455,316 @@ python agent.py
 
 ## 已知局限 & 改进路线
 
-| 优先级 | 问题 | 方案 |
-|--------|------|------|
-| P0 | SurfaceState 已注入但方法原始 | 见下方「State Formatter 重设计划」 |
-| P0 | 突破事件无实际效果 | 事件触发时修改 prompt 模板或切换回复策略 |
-| P1 | 硬编码权重无法学习 | 权重表外部化为 JSON 参数文件，支持用户反馈微调 |
-| P1 | 上下文窗口仅 4 条 | 扩展至 10~20 + 接入 Chroma 向量检索 |
-| P1 | Checkpointer 未集成 | `graph.compile(checkpointer=saver)` |
-| P2 | 无用户心理模型 | 增加 UserProfile 状态层 |
+### 优先级总览
 
-### State Formatter 重设计划（当前 P0）
+| 优先级 | 问题 | 涉及层 | 方案概要 |
+|--------|------|--------|---------|
+| P0 | SurfaceState 注入方法原始 | state_formatter.py | 见下方「State Formatter 重设计划」 |
+| P0 | 门控恒定不变 | ④ Gate Control | 引入 relationship/internal 参与门控计算，实现"关系深入→防线松动" |
+| P0 | 衰减系数静态 | ⑥ Decay | 改为动态 decay，由 traits/relationship/gated_stimuli 每轮计算 |
+| P0 | **门控与衰减深层矛盾** | **④ Gate + ⑥ Decay** | **统一 defense 参数同步驱动门控与衰减，消除"压抑但忘得快"的矛盾组合** |
+| P1 | 感知层缺少角色状态上下文 | ① Perception | 将角色当前状态摘要注入感知模型的上下文 |
+| P1 | 刺激构造层在当前实现中冗余 | ① Stimulus Construction | 当前为纯线性层，可合并至上游 perception 或下游调制层 |
+| P1 | 表面投影无时间惯性 | ⑦ Surface Projection | 引入表面状态惯性项，使表达变化有滞后 |
+| P1 | 硬编码权重无法学习 | 全局 | 权重外部化为 JSON 参数文件 |
+| P1 | 上下文窗口仅 4 条 | perception.py | 扩展至 10~20 + 接入 Chroma 向量检索 |
+| P2 | 无用户心理模型 | 全局 | 增加 UserProfile 状态层 |
+| P2 | **三个状态缺少完整消息视野** | **全局** | **见下方「RNN 视野限制」** |
+
+---
+
+### P0: 门控恒定不变
+
+#### 问题
+
+`compute_gates()` 仅以 `traits` 为输入：
+
+```python
+def compute_gates(traits: np.ndarray) -> np.ndarray:
+```
+
+traits 在对话中几乎不变化（10 维固定参数），导致每轮门控值完全一致：
+- 高自尊角色的压抑门永远是 0.74——即使被关心 100 次，防御也不会有任何松动
+- 不存在"破防"机制——长期积累的信任、好感、依赖不会反向调节防御强度
+
+这不是心理动力学——现实中的防御会因关系深入而逐渐松动。
+
+#### 方案
+
+将 relationship_state（可选 + internal_state）引入门控计算：
+
+```python
+def compute_gates(
+    traits: np.ndarray,
+    relationship: np.ndarray,
+    internal: Optional[np.ndarray] = None,
+) -> np.ndarray:
+```
+
+具体策略：
+- **压抑门**：信任和情感安全感每轮乘以衰减系数 → 高信任角色防御自然降低
+- **脆弱门**：熟悉度和好感积累 → 敢于示弱的倾向逐步上升
+- **依恋门**：好感度升高 → 对关系刺激的敏感度调整
+- **应急突破**（可选）：孤独或思念积累到阈值时，门控临时失效（最脆弱的时刻）
+
+衰减系数：
+```python
+# 关系每轮松动压抑门
+G_Suppression *= (1.0 - R_Trust × 0.25)
+G_Suppression *= (1.0 - R_Emotional_Safety × 0.20)
+```
+
+效果是累积的：
+```
+第 1 轮: R_Trust=0.30 → 压抑门 × 0.925
+第 50 轮: R_Trust=0.65 → 压抑门 × 0.838
+第 100 轮: R_Trust=0.85 → 压抑门 × 0.788
+```
+
+角色仍然有防御（受 traits 基线决定），但不再是铁板一块。
+
+---
+
+### P0: 衰减系数静态
+
+#### 问题
+
+当前的 decay 系数是固定常数：
+
+```python
+INTERNAL_DECAY = [0.98, 0.92, 0.95, 0.95, 0.85, 0.97, 0.93, 0.90]
+```
+
+不依赖人格、不依赖事件、不依赖语境。这意味着：
+- 一次冲突让 stress=0.8，第二天掉到 0.75——即使角色很记仇（高 Anger_Reactivity + 高 Pride），消气速度也和一碰就忘的角色一样
+- 「是否已经被安抚」「是否还在等道歉」「这段关系的信任有多深」——这些信息完全不参与衰减
+
+#### 方案
+
+改为每轮动态计算衰减系数：
+
+```python
+def compute_dynamic_decay(
+    base_decay: np.ndarray,
+    traits: np.ndarray,
+    relationship: np.ndarray,
+    gated_stimuli: np.ndarray,
+) -> np.ndarray:
+```
+
+核心逻辑（以 stress 为例）：
+```python
+# 冲突后，记仇角色衰减极慢（对方没道歉就不原谅）
+if gated_stimuli[ST_CONFLICT] > 0.3:
+    decay[I_STRESS] -= traits[T_PRIDE] * 0.08
+    decay[I_STRESS] -= traits[T_ANGER_REACTIVITY] * 0.06
+
+# 收到道歉（validation 高、conflict 低）→ 加速消解
+if gated_stimuli[ST_VALIDATION] > 0.4 and gated_stimuli[ST_CONFLICT] < 0.2:
+    decay[I_STRESS] += 0.05
+
+# 高信任 → 更易释怀
+decay[I_STRESS] += relationship[R_TRUST] * 0.03
+```
+
+**时间线对比（记仇角色，未道歉）：**
+```
+固定 decay:   stress=0.80 → 0.75 → 0.71 → 0.63（5 轮后基本没事）
+动态 decay:   stress=0.80 → 0.78 → 0.77 → 0.74（持续压着，等道歉后才会松动）
+```
+
+扩展到其他维度：
+- **irritation**：abandonment 刺激→依恋焦虑高的人烦躁持续更久
+- **loneliness**：独处时（无 closeness 刺激）依恋焦虑高→孤独衰减更慢
+- **关系维度**：冲突期间信任和安全感衰减暂停；和解后恢复正常
+
+---
+
+### P0: 门控与衰减的深层矛盾
+
+#### 问题
+
+门控和衰减在各自的 pipeline 位置中处理不同对象：
+
+```
+④ apply_gates(stimuli, gates)    → 处理输入：决定"多少能进来"
+⑤ h_t = A·h_{t-1} + B·gated + c  → 状态更新
+⑥ apply_decay(state, decay)      → 处理存量：决定"旧的留多久"
+```
+
+两者在代码中完全独立，但心理上它们控制的是同一个防御机制的两面：
+
+| | 门控（输入侧） | 衰减（保持侧） |
+|--|-------------|-------------|
+| 心理隐喻 | "要不要在意" | "能不能放下" |
+| 控制对象 | 刺激能否进入 | 已有情绪能留多久 |
+
+**当前实现会产生心理上自相矛盾的组合：**
+
+```
+高压抑(门控高) + 标准衰减 = 进得少但忘得和普通人一样快
+```
+
+心理上，一个高压抑的角色应该：
+- 很少让外界刺激穿透防御 → 刺激进得少 ✅（门控做到了）
+- 但进来的那些不会轻易消化 → 应该久久放不下 ❌（衰减没做到，和普通人一样快）
+
+反之亦然——低防御角色应该：
+- 感受强烈（全进） ✅（门控低，刺激通过）
+- 但恢复快（放得下） ❌（衰减固定，没有比其他人更快）
+
+**衰减和门控共享同一个"防御系数"，但当前代码把它们当成两个独立常数处理。**
+
+#### 修复方向
+
+门控和衰减应该由同一个心理防御参数驱动：
+
+```python
+def compute_defense(traits, relationship) -> float:
+    """计算统一的心理防御值。"""
+    base = traits[T_PRIDE] * 0.4 + (1 - traits[T_EMOTIONAL_OPENNESS]) * 0.3
+    base *= (1.0 - relationship[R_TRUST] * 0.25)      # 关系松动防御
+    return np.clip(base, 0.0, 1.0)
+
+# 门控由 defense 决定
+gates[G_SUPPRESSION] = defense * 0.8                    # 高防御→高压抑
+
+# 衰减由 defense 反向决定
+decay[I_STRESS] = base_decay - defense * 0.08            # 高防御→衰减慢
+decay[I_IRRITATION] = base_decay - defense * 0.10
+```
+
+这样形成一条一致的人格外推：
+
+| defense | 门控效果 | 衰减效果 | 心理画像 |
+|---------|---------|---------|---------|
+| 0.8 | 刺激砍 60% | stress decay 0.84（慢） | 压抑且记仇，积累型 |
+| 0.5 | 刺激砍 30% | stress decay 0.88（中） | 适度防御，正常消解 |
+| 0.2 | 刺激砍 12% | stress decay 0.92（快） | 开放且恢复快，体验型 |
+
+随着关系深化，defense 同步下降，门控和衰减同步松动——**一个参数控制两扇门**。
+
+---
+
+### P1: 感知层缺少角色状态上下文
+
+#### 问题
+
+`perception_node` 调用感知模型时的输入只有固定 `PERCEPTION_SYSTEM_PROMPT` + 最近 4 条对话消息：
+
+```python
+context = extract_recent_context(state["messages"], cfg["context_window"])
+call_perception_with_retry(context, cfg)
+```
+
+角色当前的心理状态（loneliness=0.9 vs 0.2）和关系状态（affection=0.8 vs 0.3）**完全不参与感知过程**。这意味着：
+- 同样一句"我先睡了"，角色感到孤独时会解读为更大的 rejection/abandonment，但现在感知模型看不到这个差异
+- 同样一句"你在干嘛"，好感度高时被解读为 affection/attention，好感度低时可能是客套——感知模型无法区分
+
+#### 方案
+
+将角色当前状态压缩为摘要，拼入感知上下文：
+
+```python
+def perception_node(state: State) -> dict:
+    context = extract_recent_context(state["messages"], cfg["context_window"])
+    # 将角色当前状态摘要加入感知上下文
+    state_summary = format_state_perception_context(
+        internal=state.get("internal_state"),
+        relationship=state.get("relationship_state"),
+        traits=state.get("traits"),
+    )
+    context.insert(0, SystemMessage(
+        content=f"[角色当前心理语境]\n{state_summary}\n---"
+    ))
+    result = call_perception_with_retry(context, cfg)
+```
+
+`state_summary` 示例（3~5 句话，不暴露精确数值）：
+```
+你当前对用户的感情：好感度较高（约0.7），信任感中等偏低（约0.4）
+你的内心状态：有一定孤独感（约0.6），情绪上轻微疲惫（约0.4）
+核心人格：高敏感、高自尊、依恋焦虑偏高
+```
+
+---
+
+### P1: 刺激构造层在当前实现中冗余
+
+#### 问题
+
+当前刺激构造是纯线性层：
+
+```python
+stimuli = signals @ SIGNAL_TO_STIMULUS  # (9,) @ (9,7) → (7,)
+```
+
+没有非线性、没有条件、没有从角色状态读取额外信息。它的全部功能是一个静态重加权矩阵，可以被吸收到以下任一位置：
+- **上游**：感知层直接输出 7 维刺激空间（在 perception prompt 里写明映射规则）
+- **下游**：将 W_sig2stim 和 M_trait 合并为一个矩阵（`W_combined = W_sig2stim @ M_trait` 的等效融合）
+
+#### 保留理由
+
+如果未来感知层接了角色状态（见 P1 感知层改进），且保持"客观信号提取 vs 主观意义翻译"的双层设计，这一层才有独立存在的价值——目前仅为架构锚点。
+
+---
+
+### P1: 表面投影无时间惯性
+
+#### 问题
+
+`project_surface()` 每轮独立计算，不引用上一轮的表面状态：
+
+```python
+s[S_WARMTH] = 0.3 + R_AFFECTION × 0.4 - I_STRESS × 0.2
+# 没有 S_{t-1} 项
+```
+
+结果：角色内部已经消气了（irritation=0.2），表面立刻变得温和（sharpness=0.3）。但现实中，人的神情是有惯性的——即使心里已经不生气了，表情可能还冷着。
+
+#### 方案
+
+引入表面状态惯性：
+
+```python
+def project_surface(
+    internal, relationship, traits,
+    previous_surface: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    s = _compute_raw_surface(internal, relationship, traits)
+
+    if previous_surface is not None:
+        # 表面惯性：70% 保留上一轮表达，30% 反映当前状态
+        s = 0.7 * previous_surface + 0.3 * s
+
+    # 特质修饰（同上）
+    ...
+    return np.clip(s, 0.0, 1.0)
+```
+
+这样，即使 irritation 从 0.7 骤降到 0.2，sharpness 在下一轮也是：
+```
+sharpness_t = 0.7 × 0.65 + 0.3 × 0.25 = 0.53
+```
+而不是直接跳到 0.25——面部表情的"余怒"被保留。
+
+注意：这要求 `surface_state` 在 State TypedDict 中被持久化并在下一轮传递。
+
+---
+
+### 现存的其他改进项
+
+#### State Formatter 重设计划（P0）
+
+保持下方原有方案。核心问题仍是：5 级阈值 `_desc()` 将连续状态引擎的输出重新离散化。目标是用连续加权语义投影替代。
+
+#### 权重参数外部化（P1）
+
+所有矩阵系数（W_sig2stim、M_trait、M_rel、A、B 等）硬编码在 `state_engine.py` 的 `_build_*()` 函数中。应外部化为 JSON/YAML 配置文件，支持热加载。
+
+#### 上下文窗口扩展（P1）
+
+同原有方案。扩展至 10~20 条消息 + Chroma 向量检索。
 
 #### 核心认知
 
@@ -561,6 +861,78 @@ Layer 4 — 微行为建议（可选，引导 LLM）
 - 输出格式正式分层（核心态势 / 语气倾向 / 表达限制 / 微行为建议）
 - 考虑用 Mini-LLM 或简单线性层替代手工映射函数
 - 评估 LLM 对不同格式输出的响应稳定性
+
+---
+
+### P2: 三个状态缺少完整消息视野（RNN 瓶颈）
+
+#### 问题
+
+如果把状态引擎看作一个 RNN，每轮的更新是：
+
+```
+Perception: 只看 messages[-4:]              → signals[9]
+State Engine: h_t = A·h_{t-1} + B·input     → internal[8], rel[6]
+Surface: 每轮重算，无时序                      → surface[7]
+```
+
+三个状态的信息来源：
+
+| 状态 | 存储 | 信息来源 | 能否看到全部消息 |
+|------|------|---------|--------------|
+| internal_state | 8 维持久化 | 本轮 signals + 上一轮自身 | ❌ 压缩在 8 维中 |
+| relationship_state | 6 维持久化 | 本轮 signals + impact + 上一轮自身 | ❌ 压缩在 6 维中 |
+| surface_state | 每轮重算不存储 | 本轮 internal + rel + traits | ❌ 零记忆 |
+
+**两个层次的视野缺失：**
+
+**① Perception 层的窗口截断：**
+```python
+extract_recent_context(messages, context_window=4)
+```
+感知模型只看最后 4 条消息。第 5 条前的关键语境信息完全丢失。即使 internal_state 里留下了痕迹，那也是经衰减后的压缩残量——无法替代原文语境。
+
+**② 状态压缩的信息丢失：**
+内部状态只有 8 维、关系状态只有 6 维。所有历史消息必须被压缩到这些维度中。维度有半衰期：
+- irritation 半衰期 4 轮 → 冲突的愤怒 4 轮后剩一半
+- longing 半衰期 23 轮 → 思念保留最久
+- trust 半衰期 69 轮 → 信任伤害记住最久
+
+**30 轮前用户说了一句很伤人的话 → irritation 已经完全归零了（4 轮半衰期），trust 虽然还有痕迹（69 轮半衰期）但只剩下"信任低"这个事实，原话内容、语气、上下文都丢了。**
+
+这与 RNN 的长期依赖问题是完全一样的——hidden state 作为有损压缩渠道，长程信息不可避免地被稀释。
+
+#### 方案
+
+**A）增大 perception 上下文窗口（短期）**
+- 4 → 12~20，配合 Chroma 向量检索提取相关历史
+- 简单有效，但解决不了"文本状态必须压缩进低维空间"的问题
+
+**B）增加状态维度（中期）**
+- 加入 8~16 维的"记忆痕迹"状态，专门存储与用户有关的长期记忆特征
+- 独立于情绪状态，不受 irritation 等快速维度的衰减影响
+- 如：`memory_salience`（这段对话对角色有多重要）、`memory_valence`（正面/负面记忆倾向）
+
+**C）接入 Chroma 向量检索（中期）**
+- 已声明依赖但未连接。让 LLM node 可以主动检索相关历史消息
+- 与状态引擎解耦——LLM 看到完整历史，状态引擎只看压缩状态
+- 参考 RAG 架构
+
+**D）增加长期记忆叙事状态（长期）**
+- 在 State 中增加 `memory_traces: np.ndarray`（16~32 维），由检测到"重要事件"时刷新
+- 关键事件（情感重量 > 0.7、信任冲击 > 0.3 等）在此留下持久痕迹
+- 衰减极慢（decay > 0.999），由新事件覆写而非衰减消失
+
+**推荐路径：** D（增加记忆痕迹向量）→ A（扩大窗口）→ C（Chroma 检索）。D 保持状态引擎的架构完整性，A 和 C 是辅助性增强。
+
+---
+
+### HiddenState 已移除（已执行）
+
+隐藏状态层（hidden_state、突破事件、事件触发）在 commit `d0f726a` 中移除。
+README 中原有的隐藏层公式（⑦~⑧）已过时。
+
+---
 
 ## License
 
