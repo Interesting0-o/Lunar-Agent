@@ -229,22 +229,6 @@ def _dict_to_array(d: dict, label_idx: dict, size: int) -> np.ndarray:
     return arr
 
 
-def surface_from_dict(d: dict) -> np.ndarray:
-    return _dict_to_array(d, S_LABEL_IDX, S_SIZE)
-
-
-def traits_from_dict(d: dict) -> np.ndarray:
-    return _dict_to_array(d, T_LABEL_IDX, T_SIZE)
-
-
-def internal_from_dict(d: dict) -> np.ndarray:
-    return _dict_to_array(d, I_LABEL_IDX, I_SIZE)
-
-
-def relationship_from_dict(d: dict) -> np.ndarray:
-    return _dict_to_array(d, R_LABEL_IDX, R_SIZE)
-
-
 def signals_from_dict(d: dict) -> np.ndarray:
     """将 user_signals 的键值对字典转换为 9 维 SocialSignals 数组。"""
     return _dict_to_array(d, SS_LABEL_IDX, SS_SIZE)
@@ -271,8 +255,12 @@ class State(TypedDict):
     internal_state: Optional[np.ndarray]
     relationship_state: Optional[np.ndarray]
 
-    # ── 感知节点输出（每轮清理，不持久化残留） ──
-    # perception_node 写入，state_engine_node 消费后置为 None
+    # ── 感知节点输出（perception_node 写入，state_engine_node 消费后置为 None） ──
+    user_signals: Optional[np.ndarray]
+    user_interaction_impact: Optional[np.ndarray]
+
+    # ── 状态格式化输出（state_formatter_node 写入，llm_node 消费） ──
+    state_description: Optional[str]
 
     # ── 系统标记 ──
     has_inject_system_prompt: bool
