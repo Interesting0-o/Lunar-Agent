@@ -7,21 +7,20 @@
 ## 架构
 
 ```
-用户输入 → Perception Node → State Engine → LLM Node → 回复
+用户输入 → Perception Node → State Engine → State Formatter → LLM Node → 回复
               │                    │
-        社交信号解析          多层状态更新
-        (9维 + 4维)         (Surface / Internal
-                              Hidden / Relationship)
+        心理刺激提取          多层状态更新
+        (7维 Stimulus)       (Internal / Relationship
+                              → Surface 投影)
 ```
 
-### 四层心理状态模型
+### 三层心理状态模型
 
 | 层 | 字段 | 含义 |
 |---|------|------|
-| **Surface** | expressiveness, warmth, sharpness... | 用户能看到的情绪表现 |
 | **Internal** | energy, stress, loneliness, longing... | 角色真正感受到的情绪 |
-| **Hidden** | suppressed_sadness, hidden_affection | 被压抑、不表达的情感 |
 | **Relationship** | affection, trust, romantic_tension... | 角色对用户的关系评估 |
+| **Surface** | expressiveness, warmth, sharpness... | 用户能看到的情绪表现（动态投影，不存储） |
 
 **关键机制**：内部状态 ≠ 表面表达。高 pride 角色会压抑好感，高 attachment 角色会放大被抛弃的恐惧——这就是"口是心非"的计算实现。
 
@@ -30,13 +29,14 @@
 ```
 用户输入
   ↓
-Perception Node → SocialSignals (affection/attention/intimacy/...) ×9
-                → InteractionImpact (emotional_weight/memorability/...) ×4
+Perception Node → StimulusVector (abandonment/validation/closeness/...) ×7
+                → LLM 一步到位输出心理刺激强度，不再分两步（社交信号→线性构造）
   ↓
-State Engine    → 基于权重规则表 + 特质修饰器更新 4 层状态
-                → 检查隐藏情感是否突破阈值 → 触发剧情事件
+State Engine    → 6 层纯函数 pipeline：特质调制→关系调制→门控→动力系统→衰减→表面投影
   ↓
-LLM Node        → 注入角色 system prompt，生成回复
+State Formatter → 数值状态 → 中文"导演笔记"
+  ↓
+LLM Node        → 注入角色 system prompt + 状态描述，生成回复
 ```
 
 ---
@@ -47,13 +47,10 @@ LLM Node        → 注入角色 system prompt，生成回复
 
 | 向量 | 维度 | 索引常量 | 含义 |
 |------|------|----------|------|
-| $x$ | 9 | `SS_*` | 社交信号（从用户输入提取） |
-| $i$ | 4 | `II_*` | 互动影响（从用户输入提取） |
-| $s$ | 7 | `ST_*` | 心理刺激（构造层输出） |
+| $s$ | 7 | `ST_*` | 心理刺激（perception 直接输出） |
 | $g$ | 4 | `G_*` | 门控值 |
 | $h_{\text{int}}$ | 8 | `I_*` | 内部心理状态 |
 | $h_{\text{rel}}$ | 6 | `R_*` | 关系状态 |
-| $h_{\text{hid}}$ | 3 | `H_*` | 隐藏（压抑）状态 |
 | $y$ | 7 | `S_*` | 表面表达（动态投影，不存储） |
 | $p$ | 10 | `T_*` | 人格特质（稳定参数） |
 
@@ -61,50 +58,21 @@ LLM Node        → 注入角色 system prompt，生成回复
 
 $$
 \begin{aligned}
-s &= W_{\text{sig2stim}} \; x                     &&\text{① 刺激构造} \\
-s &= s \odot \bigl(1 + \Delta p \cdot M_{\text{trait}}\bigr)   &&\text{② 特质调制} \\
-s &= s \odot \bigl(1 + h_{\text{rel}} \cdot M_{\text{rel}}\bigr) &&\text{③ 关系调制} \\
-g &= \text{gate\_fn}(p, h_{\text{hid}})           &&\text{④ 门控计算} \\
-s_g &= \text{gate\_apply}(s, g)                   &&\text{④ 门控应用} \\
-h_{\text{int}}' &= A\, h_{\text{int}} + B\, s_g + c(p)      &&\text{⑤ 内部动力系统} \\
-h_{\text{rel}}' &= A_{\text{rel}}\, h_{\text{rel}} + B_{\text{rel}}\, s_g + \Delta_{\text{impact}} &&\text{⑤b 关系动力系统} \\
-h_{\text{int}}' &= b_{\text{int}} + (h_{\text{int}}' - b_{\text{int}}) \odot d_{\text{int}} &&\text{⑥ 衰减} \\
+s &= s \odot \bigl(1 + \Delta p \cdot M_{\text{trait}}\bigr)   &&\text{① 特质调制} \\
+s &= s \odot \bigl(1 + h_{\text{rel}} \cdot M_{\text{rel}}\bigr) &&\text{② 关系调制} \\
+g &= \text{gate\_fn}(p, h_{\text{rel}}, h_{\text{int}})           &&\text{③ 门控计算} \\
+s_g &= \text{gate\_apply}(s, g)                   &&\text{③ 门控应用} \\
+h_{\text{int}}' &= A\, h_{\text{int}} + B\, s_g + c(p)      &&\text{④ 内部动力系统} \\
+h_{\text{rel}}' &= A_{\text{rel}}\, h_{\text{rel}} + B_{\text{rel}}\, s_g &&\text{④b 关系动力系统} \\
+h_{\text{int}}' &= b_{\text{int}} + (h_{\text{int}}' - b_{\text{int}}) \odot d_{\text{int}} &&\text{⑤ 衰减} \\
 h_{\text{rel}}' &= b_{\text{rel}} + (h_{\text{rel}}' - b_{\text{rel}}) \odot d_{\text{rel}} \\
-\Delta h_{\text{hid}} &= f\bigl(\Delta h_{\text{int}}, s_g, g\bigr) &&\text{⑦ 隐藏积累} \\
-h_{\text{hid}}' &= b_{\text{hid}} + (h_{\text{hid}}' - b_{\text{hid}}) \odot d_{\text{hid}} \\
-\text{events} &= \text{threshold}(h_{\text{hid}}') &&\text{⑧ 事件触发} \\
-y &= \text{project}(h_{\text{int}}', h_{\text{rel}}', h_{\text{hid}}', p, g) &&\text{⑨ 表面投影}
+y &= \text{project}(h_{\text{int}}', h_{\text{rel}}', p) &&\text{⑥ 表面投影}
 \end{aligned}
 $$
 
 ---
 
-### ① 刺激构造层
-
-将社交信号映射到心理意义空间：
-
-$$
-s_j = \sum_{k} x_k \cdot W_{\text{sig2stim}}[k, j]
-$$
-
-其中 $W_{\text{sig2stim}} \in \mathbb{R}^{9 \times 7}$，$s_{\text{emotional\_weight}}$ 直接由 $i_{\text{II\_EMOTIONAL\_WEIGHT}}$ 赋值。
-
-**权重矩阵 $W_{\text{sig2stim}}$ 的非零元素：**
-
-$$
-\begin{aligned}
-s_{\text{abandonment}} &= 0.7\, x_{\text{rejection}} + 1.2\, x_{\text{abandonment}} \\
-s_{\text{validation}}  &= 0.8\, x_{\text{approval}} + 0.3\, x_{\text{affection}} \\
-s_{\text{closeness}}   &= 0.9\, x_{\text{intimacy}} + 0.2\, x_{\text{attention}} \\
-s_{\text{conflict}}    &= 1.0\, x_{\text{conflict}} + 0.3\, x_{\text{rejection}} \\
-s_{\text{dependency}}  &= 0.8\, x_{\text{dependency}} \\
-s_{\text{teasing}}     &= 0.7\, x_{\text{teasing}}
-\end{aligned}
-$$
-
----
-
-### ② 特质调制层
+### ① 特质调制层
 
 人格特质放大或衰减心理刺激：
 
@@ -135,7 +103,7 @@ $$
 
 ---
 
-### ③ 关系调制层
+### ② 关系调制层
 
 关系状态改变心理刺激的"含义"：
 
@@ -159,20 +127,49 @@ $$
 
 ---
 
-### ④ 门控层
+### ③ 门控层
+
+Gate 是角色"潜意识"的核心防线，由三层输入共同决定：
+
+$$
+g = \operatorname{clip}\bigl(\underbrace{g_{\text{trait}}}_{\text{人格基线}} \times \underbrace{m_{\text{rel}}}_{\text{关系调制}} \;+\; \underbrace{\Delta_{\text{int}}}_{\text{内部推动}},\; 0,\; 1\bigr)
+$$
+
+- **trait 基线**：人格决定的稳定防御底色
+- **rel 调制**：关系状态对基线的调制（信任→松动防御，好感→放大依恋）
+- **internal 推动**：当前心理状态的急性 push（压力→更压抑，孤独→更渴望表达）
 
 #### 门控计算
 
-四个门控值由特质和隐藏状态计算：
-
 $$
 \begin{aligned}
-g_{\text{suppression}} &= \operatorname{clip}\bigl(0.4\,p_{\text{pride}} + 0.3\,(1 - p_{\text{openness}}) + 0.3\,(1 - p_{\text{stability}}) + 0.2\,h_{\text{suppressed\_sadness}} + 0.3\,h_{\text{suppressed\_anger}} + 0.1\,h_{\text{hidden\_affection}},\; 0,\; 1\bigr) \\
-g_{\text{vulnerability}} &= \operatorname{clip}\bigl(0.5\,(1 - p_{\text{pride}}) + 0.3\,p_{\text{openness}} + 0.2\,p_{\text{sensitivity}},\; 0,\; 1\bigr) \\
-g_{\text{attachment}} &= \operatorname{clip}\bigl(0.6\,p_{\text{attachment\_anxiety}} + 0.4\,(1 - p_{\text{attachment\_avoidance}}),\; 0,\; 1\bigr) \\
-g_{\text{leakage}} &= \operatorname{clip}\bigl(1.2 \cdot \frac{1}{3}(h_{\text{suppressed\_sadness}} + h_{\text{suppressed\_anger}} + h_{\text{hidden\_affection}}) - 0.2,\; 0,\; 1\bigr)
+g_{\text{suppression}} &= \operatorname{clip}\bigl(
+    \underbrace{(0.4\,p_{\text{pride}} + 0.3\,(1-p_{\text{openness}}) + 0.3\,(1-p_{\text{stability}}))}_{\text{trait 基线}}
+    \times \underbrace{(1 - 0.20\,h_{\text{rel}}[\text{trust}] - 0.15\,h_{\text{rel}}[\text{emotional\_safety}])}_{\text{关系调制}}
+    \;+\; \underbrace{0.10\,h_{\text{int}}[\text{stress}] + 0.08\,h_{\text{int}}[\text{insecurity}]}_{\text{内部推动}},\; 0,\; 1\bigr) \\[12pt]
+g_{\text{vulnerability}} &= \operatorname{clip}\bigl(
+    \underbrace{(0.5\,(1-p_{\text{pride}}) + 0.3\,p_{\text{openness}} + 0.2\,p_{\text{sensitivity}})}_{\text{trait 基线}}
+    \times \underbrace{(1 + 0.15\,h_{\text{rel}}[\text{emotional\_safety}] + 0.10\,h_{\text{rel}}[\text{familiarity}])}_{\text{关系调制}}
+    \;+\; \underbrace{0.12\,h_{\text{int}}[\text{loneliness}] + 0.10\,h_{\text{int}}[\text{longing}]}_{\text{内部推动}},\; 0,\; 1\bigr) \\[12pt]
+g_{\text{attachment}} &= \operatorname{clip}\bigl(
+    \underbrace{(0.6\,p_{\text{attachment\_anxiety}} + 0.4\,(1-p_{\text{attachment\_avoidance}}))}_{\text{trait 基线}}
+    \times \underbrace{(1 + 0.12\,h_{\text{rel}}[\text{affection}] + 0.08\,h_{\text{rel}}[\text{romantic\_tension}])}_{\text{关系调制}}
+    \;+\; \underbrace{0.10\,h_{\text{int}}[\text{insecurity}] + 0.08\,h_{\text{int}}[\text{longing}]}_{\text{内部推动}},\; 0,\; 1\bigr) \\[12pt]
+g_{\text{leakage}} &= 0 \quad \text{(HiddenState 已移除)}
 \end{aligned}
 $$
+
+#### 动态效果示例
+
+以压抑门为例——随着关系深入，防御逐渐松动：
+
+| 阶段 | $p_{\text{pride}}$ | $h_{\text{rel}}[\text{trust}]$ | $h_{\text{rel}}[\text{safety}]$ | trait 基线 | rel 调制 | 最终 $g_{\text{supp}}$ |
+|------|-------------------|-------------------------------|--------------------------------|-----------|---------|----------------------|
+| 初识 | 0.7 | 0.20 | 0.15 | 0.74 | ×0.94 | 0.69 |
+| 熟悉 | 0.7 | 0.50 | 0.45 | 0.74 | ×0.83 | 0.62 |
+| 亲密 | 0.7 | 0.80 | 0.75 | 0.74 | ×0.73 | 0.54 |
+
+角色仍然受自尊心驱使而防御（trait 基线不变），但不再是铁板一块——信任和安全感积累后，防线自然松动。
 
 #### 门控应用
 
@@ -188,9 +185,9 @@ $$
 
 ---
 
-### ⑤ 内部动力系统
+### ④ 内部动力系统
 
-#### ⑤a 内部状态
+#### ④a 内部状态
 
 $$
 h_{\text{int}}' = \operatorname{clip}\bigl(A\, h_{\text{int}} + B\, s_g + c(p),\; 0,\; 1\bigr)
@@ -263,10 +260,10 @@ c[\text{insecurity}]  &+= (p_{\text{anxiety}} - 0.5) \times 0.01
 \end{aligned}
 $$
 
-#### ⑤b 关系状态
+#### ④b 关系状态
 
 $$
-h_{\text{rel}}' = \operatorname{clip}\bigl(A_{\text{rel}}\, h_{\text{rel}} + B_{\text{rel}}\, s_g + \Delta_{\text{impact}},\; 0,\; 1\bigr)
+h_{\text{rel}}' = \operatorname{clip}\bigl(A_{\text{rel}}\, h_{\text{rel}} + B_{\text{rel}}\, s_g,\; 0,\; 1\bigr)
 $$
 
 **关系状态耦合矩阵 $A_{\text{rel}} \in \mathbb{R}^{6 \times 6}$：**
@@ -312,19 +309,9 @@ B_{\text{rel}}[\text{teasing},\,\text{romantic\_tension}]      &= +0.08
 \end{aligned}
 $$
 
-**Impact 直接效应 $\Delta_{\text{impact}}$：**
-
-$$
-\begin{aligned}
-\text{if } i_{\text{closeness}} > 0 &: \quad h_{\text{rel}}'[\text{familiarity}] += 0.15\,i_{\text{closeness}},\; h_{\text{rel}}'[\text{emotional\_safety}] += 0.12\,i_{\text{closeness}} \\
-\text{if } i_{\text{closeness}} < 0 &: \quad h_{\text{rel}}'[\text{emotional\_safety}] += 0.15\,i_{\text{closeness}},\; h_{\text{rel}}'[\text{trust}] += 0.10\,i_{\text{closeness}} \\
-\text{if } i_{\text{trust}} \neq 0 &: \quad h_{\text{rel}}'[\text{trust}] += 0.15\,i_{\text{trust}}
-\end{aligned}
-$$
-
 ---
 
-### ⑥ 衰减层
+### ⑤ 衰减层
 
 各维度不同衰减速率，向基线回归而非归零：
 
@@ -348,54 +335,9 @@ $$
 
 关系衰减极慢：affection (0.995) 几乎不衰减，tension (0.970) 相对快。
 
-**隐藏状态衰减向量 $d_{\text{hid}} \in \mathbb{R}^{3}$：**
-
-$$
-d_{\text{hid}} = [0.93,\; 0.90,\; 0.95]
-$$
-
 ---
 
-### ⑦ 隐藏积累层
-
-从内部状态变化推导"原始情绪"，再乘以压抑门进入隐藏层：
-
-$$
-\begin{aligned}
-\Delta h_{\text{int}} &= h_{\text{int}}' - h_{\text{int}} \\
-r_{\text{sadness}} &= \max(0, \Delta h_{\text{int}}[\text{loneliness}]) + 0.5 \cdot \max(0, \Delta h_{\text{int}}[\text{stress}]) \\
-r_{\text{anger}} &= \max(0, \Delta h_{\text{int}}[\text{irritation}]) \\
-r_{\text{affection}} &= 0.15\,(s_g[\text{closeness}] + s_g[\text{validation}]) \\
-\Delta h_{\text{hid}}[\text{suppressed\_sadness}] &= 0.3 \cdot r_{\text{sadness}} \cdot g_{\text{suppression}} \\
-\Delta h_{\text{hid}}[\text{suppressed\_anger}]   &= 0.3 \cdot r_{\text{anger}} \cdot g_{\text{suppression}} \\
-\Delta h_{\text{hid}}[\text{hidden\_affection}]   &= r_{\text{affection}} \cdot g_{\text{suppression}}
-\end{aligned}
-$$
-
-高自尊额外压抑好感：
-
-$$
-\text{if } p_{\text{pride}} > 0.6: \quad
-\Delta h_{\text{hid}}[\text{hidden\_affection}] +\!= 0.3 \cdot r_{\text{affection}} \cdot 2\,(p_{\text{pride}} - 0.6)
-$$
-
----
-
-### ⑧ 事件触发层
-
-$$
-\begin{aligned}
-h_{\text{hid}}[\text{hidden\_affection}] > 0.85 &\Rightarrow \text{"AFFECTION\_BREAKTHROUGH"} \\
-h_{\text{hid}}[\text{suppressed\_sadness}] > 0.85 &\Rightarrow \text{"SADNESS\_BREAKTHROUGH"} \\
-h_{\text{hid}}[\text{suppressed\_anger}] > 0.80 &\Rightarrow \text{"ANGER\_BREAKTHROUGH"} \\
-h_{\text{hid}}[\text{suppressed\_sadness}] > 0.6 \land p_{\text{attachment\_anxiety}} > 0.6
-\land h_{\text{hid}}[\text{hidden\_affection}] > 0.5 &\Rightarrow \text{"CLINGY\_BREAKTHROUGH"}
-\end{aligned}
-$$
-
----
-
-### ⑨ 表面投影层
+### ⑥ 表面投影层
 
 表面表达由内部状态动态投影生成，不存储：
 
@@ -411,7 +353,7 @@ y_{\text{vulnerability}} &= 0.1 + 0.3\,h_{\text{int}}[\text{loneliness}] + 0.2\,
 \end{aligned}
 $$
 
-随后经隐藏泄漏效应和特质修饰调整（见 `project_surface()` 代码）。
+随后经特质修饰调整（见 `project_surface()` 代码）。
 
 ## 技术栈
 
@@ -428,15 +370,17 @@ $$
 ```
 Lunar/
 ├── agent.py              # LangGraph 图定义与编译
-├── nodes.py              # 四个图节点（inject_system / perception / state_engine / llm）
-├── perception.py         # 感知层：社交信号提取 + 验证 + 重试
-├── state_engine.py       # 状态引擎：权重规则表 + 特质修饰器 + 压抑/突破机制
-├── state.py              # 状态类型定义（TypedDict）
+├── nodes.py              # 五个图节点（inject_system / perception / state_engine / state_formatter / llm）
+├── perception.py         # 感知层：心理刺激提取 + 验证 + 重试
+├── state_engine.py       # 状态引擎：6 层纯函数 pipeline（无线性构造层）
+├── state_formatter.py    # 状态格式化：数值状态 → 中文"导演笔记"
+├── state.py              # 状态类型定义（TypedDict + 索引常量）
+├── default_state.py      # 默认基线值（traits / internal / relationship）
 ├── model.py              # LLM 模型初始化
 ├── config.py             # 运行时配置（重试策略等）
 ├── character_prompt.py   # 角色人设 SYSTEM_PROMPT
-├── perception_prompt.py  # 感知层提示词
-├── main.py               # 入口
+├── perception_prompt.py  # 感知层提示词（直接输出 7 维心理刺激）
+├── main.py               # FastAPI 入口（stub）
 └── db/                   # SQLite 持久化
 ```
 
@@ -460,12 +404,12 @@ python agent.py
 | 优先级 | 问题 | 涉及层 | 方案概要 |
 |--------|------|--------|---------|
 | P0 | SurfaceState 注入方法原始 | state_formatter.py | 见下方「State Formatter 重设计划」 |
-| P0 | 门控恒定不变 | ④ Gate Control | 引入 relationship/internal 参与门控计算，实现"关系深入→防线松动" |
+| P0 | 门控恒定不变 | ④ Gate Control | ✅ **已修复** — `compute_gates()` 现在接收 traits + relationship + current_internal，门控随关系深入动态变化 |
 | P0 | 衰减系数静态 | ⑥ Decay | 改为动态 decay，由 traits/relationship/gated_stimuli 每轮计算 |
 | P0 | **门控与衰减深层矛盾** | **④ Gate + ⑥ Decay** | **统一 defense 参数同步驱动门控与衰减，消除"压抑但忘得快"的矛盾组合** |
 | P1 | 感知层缺少角色状态上下文 | ① Perception | 将角色当前状态摘要注入感知模型的上下文 |
-| P1 | 刺激构造层在当前实现中冗余 | ① Stimulus Construction | 当前为纯线性层，可合并至上游 perception 或下游调制层 |
-| P1 | 表面投影无时间惯性 | ⑦ Surface Projection | 引入表面状态惯性项，使表达变化有滞后 |
+| P1 | ~~刺激构造层在当前实现中冗余~~ | ~~① Stimulus Construction~~ | ✅ **已移除** — perception 现在直接输出 7 维 StimulusVector |
+| P1 | 表面投影无时间惯性 | ⑥ Surface Projection | 引入表面状态惯性项，使表达变化有滞后 |
 | P1 | 硬编码权重无法学习 | 全局 | 权重外部化为 JSON 参数文件 |
 | P1 | 上下文窗口仅 4 条 | perception.py | 扩展至 10~20 + 接入 Chroma 向量检索 |
 | P2 | 无用户心理模型 | 全局 | 增加 UserProfile 状态层 |
@@ -473,55 +417,39 @@ python agent.py
 
 ---
 
-### P0: 门控恒定不变
+### P0: 门控恒定不变 ✅ 已修复
 
 #### 问题
 
-`compute_gates()` 仅以 `traits` 为输入：
+~~`compute_gates()` 仅以 `traits` 为输入，traits 在对话中几乎不变化，导致每轮门控值完全一致。~~ 已通过引入 relationship 和 internal 解决。
 
-```python
-def compute_gates(traits: np.ndarray) -> np.ndarray:
-```
+#### 已实施方案
 
-traits 在对话中几乎不变化（10 维固定参数），导致每轮门控值完全一致：
-- 高自尊角色的压抑门永远是 0.74——即使被关心 100 次，防御也不会有任何松动
-- 不存在"破防"机制——长期积累的信任、好感、依赖不会反向调节防御强度
-
-这不是心理动力学——现实中的防御会因关系深入而逐渐松动。
-
-#### 方案
-
-将 relationship_state（可选 + internal_state）引入门控计算：
+`compute_gates()` 现在接收三个输入：
 
 ```python
 def compute_gates(
     traits: np.ndarray,
     relationship: np.ndarray,
-    internal: Optional[np.ndarray] = None,
+    current_internal: np.ndarray,
 ) -> np.ndarray:
 ```
 
-具体策略：
-- **压抑门**：信任和情感安全感每轮乘以衰减系数 → 高信任角色防御自然降低
-- **脆弱门**：熟悉度和好感积累 → 敢于示弱的倾向逐步上升
-- **依恋门**：好感度升高 → 对关系刺激的敏感度调整
-- **应急突破**（可选）：孤独或思念积累到阈值时，门控临时失效（最脆弱的时刻）
+三层输入的职责：
+- **traits**：人格基线（稳定，决定防御的"底色"）
+- **relationship**：关系调制（信任/安全感 → 松动压抑，好感 → 放大依恋）
+- **current_internal**：内部推动（压力/不安 → 更压抑，孤独/渴望 → 更愿示弱）
 
-衰减系数：
-```python
-# 关系每轮松动压抑门
-G_Suppression *= (1.0 - R_Trust × 0.25)
-G_Suppression *= (1.0 - R_Emotional_Safety × 0.20)
+公式模式：`gate = clip(trait_baseline × rel_modulation + internal_push, 0, 1)`
+
+效果示例（压抑门，高自尊角色）：
+```
+初识: R_Trust=0.20 → g_supp=0.69
+熟悉: R_Trust=0.50 → g_supp=0.62
+亲密: R_Trust=0.80 → g_supp=0.54
 ```
 
-效果是累积的：
-```
-第 1 轮: R_Trust=0.30 → 压抑门 × 0.925
-第 50 轮: R_Trust=0.65 → 压抑门 × 0.838
-第 100 轮: R_Trust=0.85 → 压抑门 × 0.788
-```
-
-角色仍然有防御（受 traits 基线决定），但不再是铁板一块。
+角色仍然受自尊心驱使而防御（trait 基线不变），但不再是铁板一块——信任和安全感积累后，防线自然松动。
 
 ---
 
@@ -689,23 +617,21 @@ def perception_node(state: State) -> dict:
 
 ---
 
-### P1: 刺激构造层在当前实现中冗余
+### P1: 刺激构造层在当前实现中冗余 ✅ 已解决
 
 #### 问题
 
-当前刺激构造是纯线性层：
+~~当前刺激构造是纯线性层：`stimuli = signals @ SIGNAL_TO_STIMULUS`~~ 已移除。
 
-```python
-stimuli = signals @ SIGNAL_TO_STIMULUS  # (9,) @ (9,7) → (7,)
-```
+#### 已实施方案
 
-没有非线性、没有条件、没有从角色状态读取额外信息。它的全部功能是一个静态重加权矩阵，可以被吸收到以下任一位置：
-- **上游**：感知层直接输出 7 维刺激空间（在 perception prompt 里写明映射规则）
-- **下游**：将 W_sig2stim 和 M_trait 合并为一个矩阵（`W_combined = W_sig2stim @ M_trait` 的等效融合）
-
-#### 保留理由
-
-如果未来感知层接了角色状态（见 P1 感知层改进），且保持"客观信号提取 vs 主观意义翻译"的双层设计，这一层才有独立存在的价值——目前仅为架构锚点。
+- 删除 `state_engine.py` 中的 `construct_stimuli()`、`_build_signal_to_stimulus()` 和 `SIGNAL_TO_STIMULUS` 矩阵
+- 删除 `SocialSignals`（9 维）和 `InteractionImpact`（4 维）类型定义
+- `perception_prompt.py` 重写：LLM 直接输出 7 维 `StimulusVector`
+- `perception.py` 验证逻辑更新为检查 `user_stimuli` 字段
+- `state.py` 中 `State.user_stimuli` 替代 `user_signals` + `user_interaction_impact`
+- `nodes.py` 中 `perception_node` / `state_engine_node` 适配新接口
+- `update_relationship_dynamics()` 移除 `impact` 参数（trust/closeness 直接影响已由 B_rel 矩阵覆盖）
 
 ---
 
@@ -930,7 +856,12 @@ extract_recent_context(messages, context_window=4)
 ### HiddenState 已移除（已执行）
 
 隐藏状态层（hidden_state、突破事件、事件触发）在 commit `d0f726a` 中移除。
-README 中原有的隐藏层公式（⑦~⑧）已过时。
+
+### SocialSignals / InteractionImpact / Stimulus Construction 已移除（已执行）
+
+社交信号层（9 维）、互动影响层（4 维）和刺激构造层（线性 W_sig2stim 矩阵）
+已移除。perception 节点现在直接输出 7 维 StimulusVector。
+详情见上方「P1: 刺激构造层在当前实现中冗余 ✅ 已解决」。
 
 ---
 

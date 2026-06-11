@@ -45,10 +45,9 @@ def inject_system_node(state: State) -> dict:
 
 
 def perception_node(state: State) -> dict:
-    """感知节点：分析用户输入的社交意义。
+    """感知节点：从用户输入中直接提取心理刺激强度。
 
-    将 user_signals / user_interaction_impact 写入图 State，
-    state_engine_node 消费后会立即清理，避免 checkpoint 污染。
+    将 user_stimuli 写入图 State，state_engine_node 消费后会立即清理。
     失败时设置 error=True，条件边据此引导到 END。
     """
     cfg = PERCEPTION_CONFIG
@@ -59,17 +58,15 @@ def perception_node(state: State) -> dict:
         return {"error": True}
 
     return {
-        "user_signals": result["user_signals"],
-        "user_interaction_impact": result["user_interaction_impact"],
+        "user_stimuli": result["user_stimuli"],
         "error": False,
     }
 
 
 def state_engine_node(state: State) -> dict:
-    """状态引擎节点：根据感知输出 + 当前状态 + Traits 更新所有状态层。
+    """状态引擎节点：根据感知输出的心理刺激 + 当前状态 + Traits 更新所有状态层。
 
-    读取 state 中的 user_signals / user_interaction_impact 后，
-    将其置为 None，避免中间数据在 checkpoint 中残留。
+    读取 state 中的 user_stimuli 后将其置为 None，避免 checkpoint 残留。
     """
     if state.get("error"):
         logger.info("state_engine 跳过本轮（perception 已标记 error）")
@@ -77,20 +74,17 @@ def state_engine_node(state: State) -> dict:
 
     # ── 确保所有数值状态为 numpy 数组（兼容 json/list 反序列化） ──
     traits = _ensure_array(state.get("traits"))
-    signals = _ensure_array(state.get("user_signals"))
-    impact = _ensure_array(state.get("user_interaction_impact"))
+    stimuli = _ensure_array(state.get("user_stimuli"))
 
     result = update_all(
         current_internal=_ensure_array(state.get("internal_state")),
         current_relationship=_ensure_array(state.get("relationship_state")),
         traits=traits,
-        signals=signals,
-        impact=impact,
+        stimuli=stimuli,
     )
 
     # 消费后清理中间数据，避免 checkpoint 残留
-    result["user_signals"] = None
-    result["user_interaction_impact"] = None
+    result["user_stimuli"] = None
 
     return result
 

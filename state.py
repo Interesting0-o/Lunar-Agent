@@ -5,15 +5,16 @@
 取值见各维度的 LABELS 列表和 LABEL_IDX 映射。
 
 层级划分：
-- SurfaceState:    表面状态（即时可感知的表达特征）
-- Traits:          核心特质（长期稳定的性格参数）
-- InternalState:   内部状态（底层心理指标）
-- RelationshipState: 关系状态（对用户的互动感知）
-- SocialSignals:   社交信号（从用户输入中提取的客观社交线索）
-- InteractionImpact: 互动影响指标（本轮交互对关系层面的冲击）
-- State:           顶层状态聚合（保留 TypedDict）
+- SurfaceState:       表面状态（即时可感知的表达特征）
+- Traits:             核心特质（长期稳定的性格参数）
+- InternalState:      内部状态（底层心理指标）
+- RelationshipState:  关系状态（对用户的互动感知）
+- StimulusVector:     心理刺激（perception 直接从用户输入提取的心理意义，7维）
+- GateVector:         门控向量（控制刺激进入内部状态的程度）
+- State:              顶层状态聚合（保留 TypedDict）
 
-注意：隐藏状态层（HiddenState）已移除，相关"里表情"职责合并至 Surface 与 Gate 层。
+注意：隐藏状态层（HiddenState）、社交信号层（SocialSignals）、互动影响（InteractionImpact）
+已移除。感知节点现在直接输出 StimulusVector，不再经过线性构造层。
 """
 
 import numpy as np
@@ -138,66 +139,19 @@ R_LABEL_IDX = {k: i for i, k in enumerate(R_LABELS)}
 # ── HiddenState 已移除，相关"里表情"职责合并至 Surface 与 Gate 层 ──
 
 # ═══════════════════════════════════════════════════════════════
-# SocialSignals — 社交信号（9 维）
-# 从用户本轮输入中提取的客观社交线索，perception_node 的核心输出。
-# 各维度表示"用户话语中携带了多强的该种社交信号"（0~1）。
-# 所有维度独立，可以同时高。
+# StimulusVector — 心理刺激（7 维）
+# perception_node 的核心输出：LLM 直接从用户输入中提取的心理刺激强度。
+# 替代了旧的两阶段方案（SocialSignals → Stimulus Construction 线性层），
+# 由感知模型一步到位输出角色主观感受到的心理意义。
 # ═══════════════════════════════════════════════════════════════
 
-# ── 正向关系信号 ──
-SS_AFFECTION = 0        # 好感/喜爱信号
-SS_ATTENTION = 1        # 关注/被注意需求
-SS_INTIMACY = 2         # 亲密靠近信号
-SS_APPROVAL = 3         # 寻求认可/表扬
-
-# ── 负向/回避信号 ──
-SS_REJECTION = 4        # 排斥/推开信号
-SS_ABANDONMENT = 5      # "会离开我吗"测试信号
-
-# ── 依赖/张力信号 ──
-SS_DEPENDENCY = 6       # 依赖/需要信号
-SS_TEASING = 7          # 逗弄/调戏信号
-SS_CONFLICT = 8         # 冲突/对抗信号
-SS_SIZE = 9
-
-SS_LABELS = [
-    "affection_signal", "attention_signal", "intimacy_signal", "approval_signal",
-    "rejection_signal", "abandonment_signal",
-    "dependency_signal", "teasing_signal", "conflict_signal",
-]
-SS_LABEL_IDX = {k: i for i, k in enumerate(SS_LABELS)}
-
-# ═══════════════════════════════════════════════════════════════
-# InteractionImpact — 互动影响指标（4 维）
-# 本轮交互对关系层面的潜在冲击评估。
-# emotional_weight / memorability 为 [0,1]；
-# trust_impact / closeness_impact 为 [-1,1]。
-# ═══════════════════════════════════════════════════════════════
-
-II_EMOTIONAL_WEIGHT = 0  # 情绪重量（0=日常闲聊, 0.5=重要, 1=关系转折）
-II_MEMORABILITY = 1      # 可记忆程度（0=过眼云烟, 0.5=值得记住, 1=刻骨铭心）
-II_TRUST_IMPACT = 2      # 对信任的影响（-1=严重破坏, 0=无, 1=极大增强）
-II_CLOSENESS_IMPACT = 3  # 对亲密感的影响（-1=严重疏远, 0=无, 1=极大拉近）
-II_SIZE = 4
-
-II_LABELS = [
-    "emotional_weight", "memorability", "trust_impact", "closeness_impact",
-]
-II_LABEL_IDX = {k: i for i, k in enumerate(II_LABELS)}
-
-# ═══════════════════════════════════════════════════════════════
-# StimulusSpace — 心理意义空间（7 维）
-# 由 Stimulus Construction Layer 从社交信号构造而来。
-# 社交信号 → 心理意义，是状态引擎理解的"心理语言"。
-# ═══════════════════════════════════════════════════════════════
-
-ST_ABANDONMENT = 0      # 被抛弃恐惧（rejection + abandonment 聚合）
-ST_VALIDATION = 1       # 被认可/被重视感
-ST_CLOSENESS = 2        # 亲密靠近/连接感
-ST_CONFLICT = 3         # 冲突/对抗张力
-ST_DEPENDENCY = 4       # 被依赖/被需要感
-ST_TEASING = 5          # 被逗弄/被调侃
-ST_EMOTIONAL_WEIGHT = 6 # 情绪冲击强度
+ST_ABANDONMENT = 0      # 被抛弃恐惧（被冷落/推开/遗弃的心理冲击）
+ST_VALIDATION = 1       # 被认可/被重视感（被肯定/喜欢/认可的心理满足）
+ST_CLOSENESS = 2        # 亲密靠近/连接感（被靠近/关注/亲昵的心理体验）
+ST_CONFLICT = 3         # 冲突/对抗张力（被攻击/指责/对抗的心理压力）
+ST_DEPENDENCY = 4       # 被依赖/被需要感（被求助/被需要的心理意义）
+ST_TEASING = 5          # 被逗弄/被调侃（被调戏/逗弄的心理反应）
+ST_EMOTIONAL_WEIGHT = 6 # 情绪冲击强度（本轮对话的情感重量/严重程度）
 ST_SIZE = 7
 
 ST_LABELS = [
@@ -233,9 +187,7 @@ InternalState = np.ndarray          # 8 维，用 I_* 索引
 RelationshipState = np.ndarray      # 6 维，用 R_* 索引
 SurfaceState = np.ndarray           # 7 维，用 S_* 索引（动态投影，不存储）
 Traits = np.ndarray                 # 10 维，用 T_* 索引
-SocialSignals = np.ndarray          # 9 维，用 SS_* 索引
-InteractionImpact = np.ndarray      # 4 维，用 II_* 索引
-StimulusVector = np.ndarray         # 7 维，用 ST_* 索引
+StimulusVector = np.ndarray         # 7 维，用 ST_* 索引（perception 直接输出）
 GateVector = np.ndarray             # 4 维，用 G_* 索引
 
 # ═══════════════════════════════════════════════════════════════
@@ -256,14 +208,9 @@ def _dict_to_array(d: dict, label_idx: dict, size: int) -> np.ndarray:
     return arr
 
 
-def signals_from_dict(d: dict) -> np.ndarray:
-    """将 user_signals 的键值对字典转换为 9 维 SocialSignals 数组。"""
-    return _dict_to_array(d, SS_LABEL_IDX, SS_SIZE)
-
-
-def impact_from_dict(d: dict) -> np.ndarray:
-    """将 user_interaction_impact 的键值对字典转换为 4 维 InteractionImpact 数组。"""
-    return _dict_to_array(d, II_LABEL_IDX, II_SIZE)
+def stimuli_from_dict(d: dict) -> np.ndarray:
+    """将 user_stimuli 的键值对字典转换为 7 维 StimulusVector 数组。"""
+    return _dict_to_array(d, ST_LABEL_IDX, ST_SIZE)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -283,8 +230,7 @@ class State(TypedDict):
     relationship_state: Optional[_Array]
 
     # ── 感知节点输出（perception_node 写入，state_engine_node 消费后置为 None） ──
-    user_signals: Optional[_Array]
-    user_interaction_impact: Optional[_Array]
+    user_stimuli: Optional[_Array]
 
     # ── 状态格式化输出（state_formatter_node 写入，llm_node 消费） ──
     state_description: Optional[str]

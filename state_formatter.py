@@ -278,4 +278,4 @@ def format_state_for_node(state: State) -> str:
     if isinstance(traits, list):
         traits = np.asarray(traits, dtype=np.float64)
 
-    return format_state_narrative(internal, relationship, surface, traits)
+    return format_state_narrative(internal, relationship, surface, traits)#type:ignore
