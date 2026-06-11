@@ -5,7 +5,7 @@ agent —— LangGraph 图定义与编译
 模型初始化在 model.py，节点实现在 nodes.py，
 感知逻辑在 perception.py，状态引擎在 state_engine.py。
 """
-
+import dotenv
 import sqlite3
 import logging
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -15,8 +15,11 @@ from nodes import (
     inject_system_node,
     perception_node,
     state_engine_node,
+    state_formatter_node,
     llm_node,
 )
+dotenv.load_dotenv()
+
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -27,6 +30,7 @@ graph_builder = StateGraph(State)
 graph_builder.add_node("inject_system", inject_system_node)
 graph_builder.add_node("perception", perception_node)
 graph_builder.add_node("state_engine", state_engine_node)
+graph_builder.add_node("state_formatter", state_formatter_node)
 graph_builder.add_node("llm", llm_node)
 
 
@@ -58,7 +62,8 @@ graph_builder.add_conditional_edges(
     route_after_perception,
     {"state_engine": "state_engine", "end": END},
 )
-graph_builder.add_edge("state_engine", "llm")
+graph_builder.add_edge("state_engine", "state_formatter")
+graph_builder.add_edge("state_formatter", "llm")
 graph_builder.add_edge("llm", END)
 
 compiled_graph = graph_builder.compile()
@@ -76,7 +81,7 @@ def tui_test():
 
     config =  {"configurable": {"thread_id": "useasdr_123"}}
 
-    state = check_graph.get_state(config)
+    state = check_graph.get_state(config)#type: ignore
     print(state)
     with open("test.json", "r") as f:
         test_data = json.load(f)
@@ -105,11 +110,11 @@ def tui_test():
             # 移除 has_inject_system_prompt 让 router 走 inject_system_node
             # （否则首跳跳过注入角色 system prompt → LLM 无角色上下文 → 性格崩坏）
             test_data.pop("has_inject_system_prompt", None)
-            res = check_graph.stream(test_data, config)
+            res = check_graph.stream(test_data, config)#type:ignore
             is_inject_system = True
 
         else:
-            res = check_graph.stream({"messages":[HumanMessage(content=user_input)]}, config)
+            res = check_graph.stream({"messages":[HumanMessage(content=user_input)]}, config)#type:ignore
 
         print("[Lunar]:", end="")
         for chunk in res:

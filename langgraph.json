@@ -2,5 +2,6 @@
   "graphs": {
     "compiled_graph": "./agent.py:compiled_graph"
   },
+  "env":".env",
   "dependencies": ["."]
 }

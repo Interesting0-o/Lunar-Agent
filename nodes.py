@@ -17,6 +17,7 @@ from model import model
 from state import State
 from perception import extract_recent_context, call_perception_with_retry
 from state_engine import update_all
+from state_formatter import format_state_for_node
 from default_state import DEFAULT_TRAITS
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 def _ensure_array(v, dtype=np.float64) -> np.ndarray:
     """确保值为 numpy 数组（兼容 Python list/json 反序列化）。"""
     if v is None:
-        return None
+        return None#type:ignore
     if isinstance(v, np.ndarray):
         return v
     return np.asarray(v, dtype=dtype)
@@ -87,15 +88,37 @@ def state_engine_node(state: State) -> dict:
         impact=impact,
     )
 
-    # ── 消费后清理中间数据，不让它们留在 checkpoint 中 ──
+    # 消费后清理中间数据，避免 checkpoint 残留
     result["user_signals"] = None
     result["user_interaction_impact"] = None
 
     return result
 
 
+def state_formatter_node(state: State) -> dict:
+    """状态格式化节点：将 State Engine 输出的数值状态翻译为自然语言描述。
+
+    写入 state_description 字段，供 llm_node 注入到模型调用中。
+    如果 error=True（perception 失败），跳过格式化。
+    """
+    if state.get("error"):
+        logger.info("state_formatter 跳过本轮（perception 已标记 error）")
+        return {}
+
+    state_description = format_state_for_node(state)
+    return {"state_description": state_description}
+
+
 def llm_node(state: State) -> dict:
-    """LLM 回复节点：用消息历史调用模型生成回复。"""
+    """LLM 回复节点：用消息历史 + 当前状态描述调用模型生成回复。"""
     messages = state["messages"]
-    res = model.invoke(messages)
+    state_desc = state.get("state_description")
+
+    if state_desc:
+        # 将状态描述作为 SystemMessage 注入（不持久化到 state.messages）
+        inject_msg = SystemMessage(content=state_desc)
+        res = model.invoke([inject_msg] + messages)
+    else:
+        res = model.invoke(messages)
+
     return {"messages": [res]}
