@@ -12,3 +12,4 @@ langgraph.json
 .langgraph_api
 .env
 CLAUDE.md
+.claude
