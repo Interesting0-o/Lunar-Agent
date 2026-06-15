@@ -9,16 +9,15 @@ nodes —— LangGraph 图节点函数
 """
 
 import numpy as np
-from character_prompt import SYSTEM_PROMPT
+from prompts import SYSTEM_PROMPT
 from config import PERCEPTION_CONFIG
 import logging
 from langchain.messages import SystemMessage
-from model import model
-from state import State
+from llm import model
+from state import State, DEFAULT_TRAITS
 from perception import extract_recent_context, call_perception_with_retry
 from state_engine import update_all
 from state_formatter import format_state_for_node
-from default_state import DEFAULT_TRAITS
 
 logger = logging.getLogger(__name__)
 

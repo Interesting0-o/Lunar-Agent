@@ -13,10 +13,10 @@ perception_node 的输出格式：
 import json
 import logging
 import numpy as np
-from perception_prompt import PERCEPTION_SYSTEM_PROMPT
+from prompts import PERCEPTION_SYSTEM_PROMPT
 from typing import Optional
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
-from model import perception_model
+from llm import perception_model
 from state import ST_LABELS, stimuli_from_dict
 
 logger = logging.getLogger(__name__)
