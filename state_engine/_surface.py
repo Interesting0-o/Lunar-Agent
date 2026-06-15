@@ -19,7 +19,7 @@ from state import (
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT,
 )
-from ._utils import soft_clamp
+from ._utils import soft_clamp, _sigmoid
 
 
 def project_surface(
@@ -49,14 +49,16 @@ def project_surface(
     s[S_SHARPNESS]      += outer_stimuli[ST_TEASING]     * 0.10
     s[S_WARMTH]         += outer_stimuli[ST_DEPENDENCY]  * 0.10
 
-    # 特质修饰
-    if traits[T_PRIDE] > 0.6:
-        s[S_SHARPNESS]     += traits[T_PRIDE] * 0.10
-        s[S_VULNERABILITY] -= traits[T_PRIDE] * 0.15
-    if traits[T_EMOTIONAL_OPENNESS] > 0.6:
-        s[S_EXPRESSIVENESS] += traits[T_EMOTIONAL_OPENNESS] * 0.10
-        s[S_RESTRAINT]      -= traits[T_EMOTIONAL_OPENNESS] * 0.10
-    if traits[T_OPTIMISM] > 0.6:
-        s[S_ENTHUSIASM]    += traits[T_OPTIMISM] * 0.10
+    # 特质修饰 — 连续贡献（sigmoid 软阈值，无缝过渡）
+    pride_active = _sigmoid((traits[T_PRIDE] - 0.5) / 0.15)
+    s[S_SHARPNESS]     += pride_active * traits[T_PRIDE] * 0.10
+    s[S_VULNERABILITY] -= pride_active * traits[T_PRIDE] * 0.15
+
+    openness_active = _sigmoid((traits[T_EMOTIONAL_OPENNESS] - 0.5) / 0.15)
+    s[S_EXPRESSIVENESS] += openness_active * traits[T_EMOTIONAL_OPENNESS] * 0.10
+    s[S_RESTRAINT]      -= openness_active * traits[T_EMOTIONAL_OPENNESS] * 0.10
+
+    optimism_active = _sigmoid((traits[T_OPTIMISM] - 0.5) / 0.15)
+    s[S_ENTHUSIASM]    += optimism_active * traits[T_OPTIMISM] * 0.10
 
     return soft_clamp(s, 0.0, 1.0)

@@ -1,21 +1,27 @@
-"""State Engine 主入口：Pipeline 编排。
+"""State Engine Pipeline —— 3 步管线编排。
 
-将 5 个子系统串联为完整的状态更新管线。
+① 防御剖面 → inner/outer 刺激
+② 残差动力学 → 内部 + 关系状态更新（含稳态恢复）
+③ 表面投影 → 可观测表达
 """
 
 from typing import Optional
 import numpy as np
 from state import ST_SIZE, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP
-from ._gates import compute_gates, apply_gates
-from ._dynamics import update_internal_dynamics, update_relationship_dynamics
-from ._decay import compute_dynamic_decay, apply_decay
+from ._defenses import compute_defense_profiles, apply_defenses
+from ._dynamics import (
+    update_internal_state,
+    update_relationship_state,
+    compute_setpoint,
+    compute_rel_setpoint,
+)
 from ._surface import project_surface
 
 
 def initialize_all(traits: np.ndarray) -> dict:
-    """首次运行：用 Traits 初始化所有状态层，outer_stimuli 用 0 向量。"""
-    internal = DEFAULT_INTERNAL.copy()
-    relationship = DEFAULT_RELATIONSHIP.copy()
+    """首次运行：用 Traits 初始化所有状态层。"""
+    internal = compute_setpoint(traits)
+    relationship = compute_rel_setpoint(traits)
     outer_zero = np.zeros(ST_SIZE, dtype=np.float64)
     surface = project_surface(internal, relationship, traits, outer_zero)
 
@@ -32,44 +38,38 @@ def update_all(
     traits: np.ndarray,
     stimuli: np.ndarray,
 ) -> dict:
-    """State Engine 主入口：4 步 Pipeline。
+    """State Engine 主入口：3 步管线。
 
     步骤:
-      ① 三向门控 → (inner_stimuli, outer_stimuli)
-      ② 内部动力系统（LSTM 式 3 门控）+ 衰减
-      ③ 关系动力系统（LTI）+ 衰减
-      ④ 表面投影
+      ① 防御剖面 → (inner_stimuli, outer_stimuli)
+      ② 残差动力学（内部 + 关系，含内建稳态恢复）
+      ③ 表面投影
 
-    返回:
-      {
-        "internal_state":     np.ndarray,  # 8 维
-        "relationship_state":  np.ndarray,  # 6 维
-        "surface_state":       np.ndarray,  # 7 维
-      }
+    Args:
+        current_internal: 当前内部状态 h_{t-1} (8,) 或 None
+        current_relationship: 当前关系状态 r_{t-1} (6,) 或 None
+        traits: 人格特质 (10,)
+        stimuli: 原始心理刺激 (7,)
+
+    Returns:
+        {"internal_state": (8,), "relationship_state": (6,), "surface_state": (7,)}
     """
     if current_internal is None:
         return initialize_all(traits)
 
-    # ① 门控
-    gates = compute_gates(traits, current_relationship, current_internal)
-    inner_stimuli, outer_stimuli = apply_gates(
-        stimuli, gates, traits, current_relationship,
+    # ① 防御剖面 → inner / outer
+    profiles = compute_defense_profiles(traits, current_relationship, current_internal)
+    inner_stimuli, outer_stimuli = apply_defenses(stimuli, profiles)
+
+    # ② 残差动力学（含内建稳态恢复，不再需要独立的 decay 步骤）
+    new_internal = update_internal_state(
+        current_internal, inner_stimuli, traits, current_relationship, profiles,
+    )
+    new_relationship = update_relationship_state(
+        current_relationship, inner_stimuli, traits,
     )
 
-    # ② 内部动力系统 + 衰减
-    new_internal = update_internal_dynamics(
-        current_internal, inner_stimuli, traits, current_relationship, gates,
-    )
-    internal_decay, rel_decay = compute_dynamic_decay(
-        traits, current_relationship, current_internal, inner_stimuli,
-    )
-    new_internal = apply_decay(new_internal, internal_decay, DEFAULT_INTERNAL)
-
-    # ③ 关系动力系统 + 衰减
-    new_relationship = update_relationship_dynamics(current_relationship, inner_stimuli)
-    new_relationship = apply_decay(new_relationship, rel_decay, DEFAULT_RELATIONSHIP)
-
-    # ④ 表面投影
+    # ③ 表面投影
     surface = project_surface(new_internal, new_relationship, traits, outer_stimuli)
 
     return {

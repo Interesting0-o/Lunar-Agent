@@ -1,20 +1,25 @@
-"""③ Dynamic Decay —— 人格驱动的动态衰减。
+"""③ Dynamic Decay —— 人格驱动的动态衰减（纯稳态恢复）。
 
 衰减速率由以下因素动态调制:
-  - 人格基线: 高傲→记仇，情绪稳定→恢复快
+  - 人格基线: 高傲→记仇（恢复慢），情绪稳定→恢复快
   - 关系语境: 信任高→压力消退快（安全基地效应）
   - 急性状态: 高压下所有负面情绪消退变慢（压力锁定）
-  - 刺激-特质共振: 特定刺激遇到特定特质时，情绪自我增强
+  - 刺激-特质共振: 特定刺激遇到特定特质时，恢复进一步放缓
 
-decay < 1.0 → 向基线回归
-decay = 1.0 → 保持不变
-decay > 1.0 → 背离基线（情绪自我增强）
+稳定性保证:
+  - 所有 decay < 1.0 严格成立（contractive，向基线回归）
+  - decay = 1.0 表示零恢复（保持当前偏离量）
+  - 永远不会 > 1.0（不会背离基线，情绪自我增强由动力学 A 矩阵负责）
 
-门控与衰减的 2×2 协同:
-  - 紧门控 + 慢衰减 = 压抑爆炸型
-  - 松门控 + 快衰减 = 表达恢复型
+门控与衰减的协作:
+  - 紧门控 + 慢衰减 = 压抑爆炸型（进得少但放不下）
+  - 松门控 + 快衰减 = 表达恢复型（进得多但也放得下）
   - 紧门控 + 快衰减 = 冷漠超然型
   - 松门控 + 慢衰减 = 敏感内耗型
+
+注意: 旧代码曾允许 decay > 1.0 作为"情绪自我增强"机制，
+已废弃——自我增强应通过跨维度耦合（A 矩阵）实现，
+不应通过破坏衰减的稳定语义来实现。
 """
 
 import numpy as np
@@ -30,6 +35,13 @@ from state import (
 )
 from ._utils import soft_clamp
 from ._matrices import _INTERNAL_BASE_DECAY, _RELATIONSHIP_BASE_DECAY
+
+
+# 衰减系数严格上界 — 保证永远向基线回归而非背离
+_MAX_INTERNAL_DECAY = 0.99   # 内部状态最快可接近"不恢复"但绝不能放大
+_MAX_RELATIONSHIP_DECAY = 0.999  # 关系状态同理，上界更接近 1（关系变化极慢）
+_MIN_INTERNAL_DECAY = 0.70
+_MIN_RELATIONSHIP_DECAY = 0.95
 
 
 def compute_dynamic_decay(
@@ -134,16 +146,29 @@ def compute_dynamic_decay(
     if stimuli[ST_CLOSENESS] > 0.3 and traits[T_ATTACHMENT_ANXIETY] > 0.55:
         idcy[I_LONGING] += stimuli[ST_CLOSENESS] * traits[T_ATTACHMENT_ANXIETY] * 0.04
 
-    # 最终 clamp
-    idcy = soft_clamp(idcy, 0.70, 1.05)
-    rdcy = soft_clamp(rdcy, 0.95, 1.005)
+    # 最终 clamp — 严格 < 1.0，永不背离基线
+    idcy = soft_clamp(idcy, _MIN_INTERNAL_DECAY, _MAX_INTERNAL_DECAY)
+    rdcy = soft_clamp(rdcy, _MIN_RELATIONSHIP_DECAY, _MAX_RELATIONSHIP_DECAY)
 
     return idcy, rdcy
 
 
 def apply_decay(state: np.ndarray, decay: np.ndarray, baseline: np.ndarray) -> np.ndarray:
-    """③ 衰减/增强：向基线回归或背离。
+    """③ 衰减：严格向基线回归（contractive mapping）。
 
     state[t] = baseline + (state[t-1] - baseline) × decay
+
+    decay ∈ (0, 1) → 收缩向基线
+    decay = 1     → 保持不变（零恢复）
+    decay < 1 必成立（调用方保证），绝不背离基线。
+
+    情绪自我增强由动力学 A 矩阵的跨维度耦合负责，
+    不通过破坏衰减语义来实现。
     """
+    if not np.all(decay < 1.0):
+        violators = np.where(decay >= 1.0)[0]
+        raise ValueError(
+            f"衰减系数必须 < 1.0，发现违规维度: {violators.tolist()}, "
+            f"decay={decay[violators]}"
+        )
     return soft_clamp(baseline + (state - baseline) * decay, 0.0, 1.0)

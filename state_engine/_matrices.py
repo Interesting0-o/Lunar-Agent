@@ -1,8 +1,13 @@
 """状态引擎的矩阵常量与工厂函数。
 
 所有耦合矩阵、影响矩阵、基线衰减率集中于此，便于后续外置化为 JSON/YAML 配置。
+
+稳定性保证:
+  - 所有耦合矩阵经过谱归一化，ρ(A) < 1.0
+  - 运行时可通过 validate_matrices() 验证不变量
 """
 
+import logging
 import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
@@ -12,6 +17,58 @@ from state import (
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
 )
+
+logger = logging.getLogger(__name__)
+
+# 目标谱半径 — 所有耦合矩阵缩放到此值以下
+_TARGET_SPECTRAL_RADIUS = 0.95
+
+
+def _spectral_normalize(matrix: np.ndarray, name: str) -> np.ndarray:
+    """谱归一化：确保矩阵谱半径 ≤ 目标值。
+
+    若 ρ(matrix) > target，整体缩放 matrix *= target/ρ。
+    保持矩阵内部相对权重不变，仅缩放整体影响强度。
+
+    返回（可能缩放后的）矩阵。
+    """
+    eigenvalues = np.linalg.eigvals(matrix)
+    rho = max(abs(ev) for ev in eigenvalues)
+
+    if rho >= _TARGET_SPECTRAL_RADIUS:
+        scale = _TARGET_SPECTRAL_RADIUS / rho
+        logger.warning(
+            "%s 谱半径 %.4f ≥ %.2f，应用谱归一化（缩放系数 %.4f）",
+            name, rho, _TARGET_SPECTRAL_RADIUS, scale,
+        )
+        return matrix * scale
+
+    logger.debug("%s 谱半径 %.4f < %.2f，跳过归一化", name, rho, _TARGET_SPECTRAL_RADIUS)
+    return matrix
+
+
+def validate_matrices() -> dict:
+    """运行时验证所有耦合矩阵的稳定性不变量。
+
+    返回 {"ok": bool, "results": [...]}
+    可在 pipeline 每轮调用，也可仅在初始化时调用一次。
+    """
+    results = []
+    all_ok = True
+
+    for name, matrix in [
+        ("STATE_COUPLING_A", STATE_COUPLING_A),
+        ("REL_STATE_COUPLING_A", REL_STATE_COUPLING_A),
+    ]:
+        eigenvalues = np.linalg.eigvals(matrix)
+        rho = max(abs(ev) for ev in eigenvalues)
+        ok = rho < 1.0 and np.all(np.isfinite(matrix))
+        if not ok:
+            logger.error("%s 不稳定: ρ=%.4f", name, rho)
+        results.append({"matrix": name, "spectral_radius": float(rho), "stable": bool(ok)})
+        all_ok = all_ok and ok
+
+    return {"ok": all_ok, "results": results}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -96,7 +153,7 @@ def _build_personality_bias() -> np.ndarray:
     return c
 
 
-STATE_COUPLING_A = _build_state_coupling()
+STATE_COUPLING_A = _spectral_normalize(_build_state_coupling(), "STATE_COUPLING_A")
 INPUT_INFLUENCE_B = _build_input_influence()
 PERSONALITY_BIAS_C = _build_personality_bias()
 
@@ -170,5 +227,5 @@ def _build_rel_input_influence() -> np.ndarray:
     return B
 
 
-REL_STATE_COUPLING_A = _build_rel_state_coupling()
+REL_STATE_COUPLING_A = _spectral_normalize(_build_rel_state_coupling(), "REL_STATE_COUPLING_A")
 REL_INPUT_INFLUENCE_B = _build_rel_input_influence()
