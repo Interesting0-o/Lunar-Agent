@@ -1,6 +1,9 @@
 """Lunar 长期记忆系统。
 
-提供记忆节点的 Pydantic 定义、JSON 文件持久化、以及基于内部状态的余弦相似度检索。
+提供记忆节点的 Pydantic 定义、JSON 文件持久化、以及三种检索方式：
+  1. 向量查询 — 基于心理状态向量（internal_state）的余弦相似度
+  2. Embedding 查询 — 基于文本语义嵌入向量的余弦相似度
+  3. 混合查询 — 以上两种的加权组合
 
 Usage:
     from memory import MemoryNode, MemoryStore, search_by_internal_state
@@ -17,11 +20,24 @@ Usage:
     )
     store.add(node)
 
-    # 按内部状态检索相似记忆
+    # ① 向量查询：按情绪状态相似度
     results = store.search_by_internal_state(current_internal, top_k=3)
+
+    # ② Embedding 查询：按文本语义相似度
+    results = store.search_by_embedding(query_text="红月下的约定", top_k=3)
+
+    # ③ 混合查询：两者加权组合
+    results = store.hybrid_search(
+        query_internal=current_internal,
+        query_text="红月下的约定",
+        state_weight=0.4,
+        embedding_weight=0.6,
+        top_k=3,
+    )
 """
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -39,21 +55,20 @@ from pydantic import BaseModel, Field, field_serializer, field_validator
 class MemoryNode(BaseModel):
     """长期记忆节点。
 
-    每个节点代表一段有意义的互动记忆，包含对话内容、当时的心理状态快照，
-    以及用于检索的元数据。
+    每个节点代表一段有意义的互动记忆，包含对话内容、当时的心理状态快照、
+    文本语义嵌入向量，以及用于检索的元数据。
 
     Attributes:
         id: UUID v4 唯一标识。
         title: 记忆标题（通常为用户消息截断到 50 字）。
         content: 详细内容（用户消息 + 角色回复的完整文本）。
         created_at: ISO 8601 创建时间戳。
-        user_message: 触发记忆的用户消息（截断到 300 字）。
-        character_response: 角色当时的回复（截断到 300 字）。
-        emotional_weight: 形成时的情感重量 [0,1]。
-        significance: 综合显著性分数 [0,1]。
         state_checkpoint: 形成时的心理状态快照。
             keys: "internal_state" (8,), "relationship_state" (6,), "surface_state" (7,)
             values: numpy float64 数组
+        embedding: 文本语义嵌入向量（由 embedding 模型生成），
+                   用于与 state_checkpoint 联合做双重相似度检索。
+                   维度取决于所用模型（如 nomic-embed-text: 768 维）。
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -61,6 +76,7 @@ class MemoryNode(BaseModel):
     content: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     state_checkpoint: Dict[str, np.ndarray] = Field(default_factory=dict)
+    embedding: Optional[np.ndarray] = Field(default=None)
 
     model_config = {
         "arbitrary_types_allowed": True,
@@ -87,6 +103,27 @@ class MemoryNode(BaseModel):
         """序列化时：将 checkpoint 中各 ndarray 值转为 Python list。"""
         return {key: val.tolist() for key, val in v.items()}
 
+    # ── embedding 序列化 ──
+
+    @field_validator("embedding", mode="before")
+    @classmethod
+    def _validate_embedding(cls, v: object) -> Optional[np.ndarray]:
+        """反序列化时：将 embedding list 转回 numpy float64 数组。"""
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return np.array(v, dtype=np.float64)
+        if isinstance(v, np.ndarray):
+            return v.astype(np.float64)
+        return None
+
+    @field_serializer("embedding")
+    def _serialize_embedding(self, v: Optional[np.ndarray]) -> Optional[list]:
+        """序列化时：将 embedding ndarray 转为 Python list。"""
+        if v is None:
+            return None
+        return v.tolist()
+
     # ── 工厂方法 ──
 
     @classmethod
@@ -97,10 +134,19 @@ class MemoryNode(BaseModel):
         internal_state: Optional[np.ndarray] = None,
         relationship_state: Optional[np.ndarray] = None,
         surface_state: Optional[np.ndarray] = None,
+        embedding: Optional[np.ndarray] = None,
     ) -> "MemoryNode":
         """从分离的状态向量创建 MemoryNode。
 
         自动组装 state_checkpoint 字典（跳过 None 向量）。
+
+        Args:
+            title: 记忆标题。
+            content: 记忆内容。
+            internal_state: 内部状态向量 (8,)。
+            relationship_state: 关系状态向量 (6,)。
+            surface_state: 表面状态向量 (7,)。
+            embedding: 文本语义嵌入向量（可选）。
         """
         checkpoint: Dict[str, np.ndarray] = {}
         if internal_state is not None:
@@ -114,6 +160,7 @@ class MemoryNode(BaseModel):
             title=title,
             content=content,
             state_checkpoint=checkpoint,
+            embedding=embedding.copy() if embedding is not None else None,
         )
 
 
@@ -140,6 +187,50 @@ def cos_similarity(a: np.ndarray, b: np.ndarray) -> float:
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
     return dot / (norm_a * norm_b)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Embedding — 文本语义嵌入
+# ═══════════════════════════════════════════════════════════════
+
+# 默认 Ollama embedding 模型及地址
+_DEFAULT_EMBED_MODEL = "nomic-embed-text"
+_DEFAULT_OLLAMA_URL = "http://localhost:11434"
+
+
+def compute_embedding(
+    text: str,
+    model: str = _DEFAULT_EMBED_MODEL,
+    base_url: str = _DEFAULT_OLLAMA_URL,
+) -> Optional[np.ndarray]:
+    """通过 Ollama 生成文本的语义嵌入向量。
+
+    使用 langchain-ollama 的 OllamaEmbeddings 将文本转为向量。
+    失败时返回 None（Ollama 未运行、模型未拉取等），由调用方自行决定行为。
+
+    Args:
+        text: 待编码的文本。
+        model: Ollama embedding 模型名，如 "nomic-embed-text"、"bge-m3"、"mxbai-embed-large"。
+        base_url: Ollama 服务地址。
+
+    Returns:
+        embedding 向量，或 None（生成失败时）。
+    """
+    if not text:
+        return None
+
+    try:
+        from langchain_ollama import OllamaEmbeddings
+
+        embeddings = OllamaEmbeddings(model=model, base_url=base_url)
+        vector = embeddings.embed_query(text)
+        return np.array(vector, dtype=np.float64)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Embedding 生成失败（model=%s, base_url=%s）请确认 Ollama 已运行且已拉取模型",
+            model, base_url,
+        )
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -277,7 +368,7 @@ class MemoryStore:
         self,
         query_internal: np.ndarray,
         top_k: int = 3,
-        threshold: float = 0.0,
+        threshold: float = 0.8,
     ) -> List[Tuple[MemoryNode, float]]:
         """基于 internal_state 的余弦相似度检索。
 
@@ -305,6 +396,130 @@ class MemoryStore:
             if internal is None or not isinstance(internal, np.ndarray):
                 continue
             sim = cos_similarity(query_internal, internal)
+            if sim >= threshold:
+                scored.append((node, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+    def search_by_embedding(
+        self,
+        query_text: str,
+        top_k: int = 3,
+        threshold: float = 0.0,
+        embedding_model: str = _DEFAULT_EMBED_MODEL,
+        embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+    ) -> List[Tuple[MemoryNode, float]]:
+        """基于文本语义嵌入的余弦相似度检索。
+
+        将查询文本编码为 embedding 向量，与每条记忆中存储的 embedding
+        计算余弦相似度，返回语义最相似的 top_k 条记忆。
+
+        Args:
+            query_text: 查询文本，用于生成语义嵌入。
+            top_k: 最多返回的结果数。
+            threshold: 最低相似度阈值 [0, 1]。
+            embedding_model: Ollama embedding 模型名。
+            embedding_base_url: Ollama 服务地址。
+
+        Returns:
+            (记忆节点, 相似度) 列表，按相似度降序排列。
+        """
+        if not query_text:
+            return []
+
+        query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+        if query_embedding is None:
+            return []
+
+        nodes = self.load()
+        if not nodes:
+            return []
+
+        scored: List[Tuple[MemoryNode, float]] = []
+        for node in nodes:
+            emb = node.embedding
+            if emb is None or not isinstance(emb, np.ndarray):
+                continue
+            sim = cos_similarity(query_embedding, emb)
+            if sim >= threshold:
+                scored.append((node, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+    def hybrid_search(
+        self,
+        query_internal: np.ndarray,
+        query_text: str,
+        state_weight: float = 0.5,
+        embedding_weight: float = 0.5,
+        top_k: int = 3,
+        threshold: float = 0.0,
+        embedding_model: str = _DEFAULT_EMBED_MODEL,
+        embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+    ) -> List[Tuple[MemoryNode, float]]:
+        """混合检索：向量查询 + Embedding 查询的加权组合。
+
+        对每条记忆同时计算：
+          1. 向量相似度 — query_internal 与 memory.state_checkpoint["internal_state"] 的余弦相似度
+          2. 文本相似度 — query_text 的嵌入向量与 memory.embedding 的余弦相似度
+
+        最终得分 = state_weight × 向量相似度 + embedding_weight × 文本相似度。
+        若某条记忆缺少某个字段，则仅用另一部分（权重自动归一化）。
+
+        Args:
+            query_internal: 当前内部状态向量 (8,)。
+            query_text: 查询文本，用于生成语义嵌入。
+            state_weight: 向量相似度权重。
+            embedding_weight: 文本嵌入相似度权重。
+            top_k: 最多返回的结果数。
+            threshold: 最低综合得分阈值 [0, 1]。
+            embedding_model: Ollama embedding 模型名。
+            embedding_base_url: Ollama 服务地址。
+
+        Returns:
+            (记忆节点, 综合得分) 列表，按得分降序排列。
+        """
+        if not query_text:
+            return self.search_by_internal_state(query_internal, top_k, threshold)
+
+        query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+
+        nodes = self.load()
+        if not nodes:
+            return []
+
+        scored: List[Tuple[MemoryNode, float]] = []
+        for node in nodes:
+            internal = node.state_checkpoint.get("internal_state")
+            emb = node.embedding
+
+            # 至少需要一种信号
+            if (internal is None or not isinstance(internal, np.ndarray)) and \
+               (emb is None or not isinstance(emb, np.ndarray)):
+                continue
+
+            sim = 0.0
+            total_weight = 0.0
+
+            if isinstance(internal, np.ndarray):
+                state_sim = cos_similarity(query_internal, internal)
+                if state_sim > 0.0:
+                    sim += state_weight * state_sim
+                    total_weight += state_weight
+
+            if isinstance(emb, np.ndarray) and query_embedding is not None:
+                emb_sim = cos_similarity(query_embedding, emb)
+                if emb_sim > 0.0:
+                    sim += embedding_weight * emb_sim
+                    total_weight += embedding_weight
+
+            # 全部信号都为零 → 跳过
+            if total_weight <= 0.0:
+                continue
+
+            sim /= total_weight  # 归一化，补偿缺失字段
             if sim >= threshold:
                 scored.append((node, sim))
 
@@ -380,6 +595,119 @@ def search_by_internal_state(
         if internal is None or not isinstance(internal, np.ndarray):
             continue
         sim = cos_similarity(query_internal, internal)
+        if sim >= threshold:
+            scored.append((node, sim))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k]
+
+
+def search_by_embedding(
+    query_text: str,
+    nodes: List[MemoryNode],
+    top_k: int = 3,
+    threshold: float = 0.0,
+    embedding_model: str = _DEFAULT_EMBED_MODEL,
+    embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+) -> List[Tuple[MemoryNode, float]]:
+    """在给定的记忆节点列表中，按文本语义嵌入余弦相似度检索。
+
+    便捷函数，不依赖 MemoryStore 实例，可直接对已加载的节点列表检索。
+
+    Args:
+        query_text: 查询文本，用于生成语义嵌入。
+        nodes: 记忆节点列表。
+        top_k: 最多返回的结果数。
+        threshold: 最低相似度阈值 [0, 1]。
+        embedding_model: Ollama embedding 模型名。
+        embedding_base_url: Ollama 服务地址。
+
+    Returns:
+        (记忆节点, 相似度) 列表，按相似度降序排列。
+    """
+    if not nodes or not query_text:
+        return []
+
+    query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+    if query_embedding is None:
+        return []
+
+    scored: List[Tuple[MemoryNode, float]] = []
+    for node in nodes:
+        emb = node.embedding
+        if emb is None or not isinstance(emb, np.ndarray):
+            continue
+        sim = cos_similarity(query_embedding, emb)
+        if sim >= threshold:
+            scored.append((node, sim))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_k]
+
+
+def hybrid_search(
+    query_internal: np.ndarray,
+    query_text: str,
+    nodes: List[MemoryNode],
+    state_weight: float = 0.5,
+    embedding_weight: float = 0.5,
+    top_k: int = 3,
+    threshold: float = 0.0,
+    embedding_model: str = _DEFAULT_EMBED_MODEL,
+    embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+) -> List[Tuple[MemoryNode, float]]:
+    """在给定的记忆节点列表中，进行向量 + Embedding 加权混合检索。
+
+    便捷函数，不依赖 MemoryStore 实例，可直接对已加载的节点列表检索。
+    组合了 search_by_internal_state 和 search_by_embedding 两种检索信号。
+
+    Args:
+        query_internal: 当前内部状态向量 (8,)。
+        query_text: 查询文本，用于生成语义嵌入。
+        nodes: 记忆节点列表。
+        state_weight: 向量相似度权重。
+        embedding_weight: 文本嵌入相似度权重。
+        top_k: 最多返回的结果数。
+        threshold: 最低综合得分阈值 [0, 1]。
+        embedding_model: Ollama embedding 模型名。
+        embedding_base_url: Ollama 服务地址。
+
+    Returns:
+        (记忆节点, 综合得分) 列表，按得分降序排列。
+    """
+    if not nodes:
+        return []
+
+    query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+
+    scored: List[Tuple[MemoryNode, float]] = []
+    for node in nodes:
+        internal = node.state_checkpoint.get("internal_state")
+        emb = node.embedding
+
+        if (internal is None or not isinstance(internal, np.ndarray)) and \
+           (emb is None or not isinstance(emb, np.ndarray)):
+            continue
+
+        sim = 0.0
+        total_weight = 0.0
+
+        if isinstance(internal, np.ndarray):
+            state_sim = cos_similarity(query_internal, internal)
+            if state_sim > 0.0:
+                sim += state_weight * state_sim
+                total_weight += state_weight
+
+        if isinstance(emb, np.ndarray) and query_embedding is not None:
+            emb_sim = cos_similarity(query_embedding, emb)
+            if emb_sim > 0.0:
+                sim += embedding_weight * emb_sim
+                total_weight += embedding_weight
+
+        if total_weight <= 0.0:
+            continue
+
+        sim /= total_weight
         if sim >= threshold:
             scored.append((node, sim))
 

@@ -9,7 +9,7 @@ nodes —— LangGraph 图节点函数
 """
 
 import numpy as np
-from prompts import SYSTEM_PROMPT
+from prompts import SYSTEM_PROMPT, MEMORY_SYSTEM_PROMPT
 from config import PERCEPTION_CONFIG
 import logging
 from langchain.messages import SystemMessage
@@ -18,6 +18,9 @@ from state import State, DEFAULT_TRAITS
 from perception import extract_recent_context, call_perception_with_retry
 from state_engine import update_all
 from state_formatter import format_state_for_node
+from memory import MemoryStore,MemoryNode
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,3 +118,28 @@ def llm_node(state: State) -> dict:
         res = model.invoke(messages)
 
     return {"messages": [res]}
+
+
+def memory_inject_node(state:State)->dict:
+
+
+
+    return 
+
+
+def memory_summery_node(state:State)->dict:
+    messages = [message for message in state["messages"] if not isinstance(message,SystemMessage)]
+    
+    messages.insert(0,SystemMessage(content=MEMORY_SYSTEM_PROMPT))
+    
+    res = model.invoke(messages) 
+
+
+    MemoryNode(
+        title = "".
+        content = res.content,
+        
+    )
+
+
+

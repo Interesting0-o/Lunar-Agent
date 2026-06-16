@@ -12,10 +12,15 @@ model = init_chat_model(
     api_key=os.environ.get("DEEPSEEK_API_KEY"),
 )
 
-perception_model = init_chat_model(
-    model="qwen2.5:7b",
-    model_provider="ollama",
-    base_url="http://localhost:11434",
-    api_key="",
-)
+# perception_model = init_chat_model(
+#     model="qwen2.5:7b",
+#     model_provider="ollama",
+#     base_url="http://localhost:11434",
+#     api_key="",
+# )
 
+preception_model = model
+
+
+if __name__ == "__main__":
+    print(model.invoke("你好，请简短介绍你自己"))
