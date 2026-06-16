@@ -8,7 +8,6 @@ agent —— TUI 交互入口
 import dotenv
 import sqlite3
 import logging
-from langgraph.checkpoint.sqlite import SqliteSaver
 from graph import compiled_graph, graph_builder
 
 dotenv.load_dotenv()
@@ -19,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 def tui_test():
     import json
+    from langgraph.checkpoint.sqlite import SqliteSaver
     from langchain.messages import HumanMessage
     connection = sqlite3.connect("./db/lunar.db", check_same_thread=False)
     saver = SqliteSaver(connection)

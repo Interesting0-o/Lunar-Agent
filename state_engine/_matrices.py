@@ -1,10 +1,8 @@
 """状态引擎的矩阵常量与工厂函数。
 
-所有耦合矩阵、影响矩阵、基线衰减率集中于此，便于后续外置化为 JSON/YAML 配置。
+所有耦合矩阵、影响矩阵集中于此，便于后续外置化为 JSON/YAML 配置。
 
-稳定性保证:
-  - 所有耦合矩阵经过谱归一化，ρ(A) < 1.0
-  - 运行时可通过 validate_matrices() 验证不变量
+稳定性保证: 所有耦合矩阵经过谱归一化，ρ(A) < 1.0
 """
 
 import logging
@@ -45,30 +43,6 @@ def _spectral_normalize(matrix: np.ndarray, name: str) -> np.ndarray:
 
     logger.debug("%s 谱半径 %.4f < %.2f，跳过归一化", name, rho, _TARGET_SPECTRAL_RADIUS)
     return matrix
-
-
-def validate_matrices() -> dict:
-    """运行时验证所有耦合矩阵的稳定性不变量。
-
-    返回 {"ok": bool, "results": [...]}
-    可在 pipeline 每轮调用，也可仅在初始化时调用一次。
-    """
-    results = []
-    all_ok = True
-
-    for name, matrix in [
-        ("STATE_COUPLING_A", STATE_COUPLING_A),
-        ("REL_STATE_COUPLING_A", REL_STATE_COUPLING_A),
-    ]:
-        eigenvalues = np.linalg.eigvals(matrix)
-        rho = max(abs(ev) for ev in eigenvalues)
-        ok = rho < 1.0 and np.all(np.isfinite(matrix))
-        if not ok:
-            logger.error("%s 不稳定: ρ=%.4f", name, rho)
-        results.append({"matrix": name, "spectral_radius": float(rho), "stable": bool(ok)})
-        all_ok = all_ok and ok
-
-    return {"ok": all_ok, "results": results}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -144,35 +118,12 @@ def _build_input_influence() -> np.ndarray:
     return B
 
 
-def _build_personality_bias() -> np.ndarray:
-    """人格偏置向量 c（I_SIZE）：每轮自然偏移，会被 A 矩阵和 clamp 约束。"""
-    c = np.zeros(I_SIZE, dtype=np.float64)
-    c[I_ENERGY] = 0.01       # 活跃角色自然恢复
-    c[I_LONELINESS] = -0.005 # 孤独自然缓解
-    c[I_IRRITATION] = -0.01  # 烦躁自然消退
-    return c
-
-
 STATE_COUPLING_A = _spectral_normalize(_build_state_coupling(), "STATE_COUPLING_A")
 INPUT_INFLUENCE_B = _build_input_influence()
-PERSONALITY_BIAS_C = _build_personality_bias()
 
 
 # ═══════════════════════════════════════════════════════════════
-# ③ Dynamic Decay 基础衰减率
-# ═══════════════════════════════════════════════════════════════
-
-_INTERNAL_BASE_DECAY = np.array([
-    0.98, 0.92, 0.95, 0.95, 0.85, 0.97, 0.93, 0.90
-], dtype=np.float64)  # energy, stress, loneliness, insecurity, irritation, longing, battery, fatigue
-
-_RELATIONSHIP_BASE_DECAY = np.array([
-    0.995, 0.990, 0.985, 0.980, 0.990, 0.970
-], dtype=np.float64)  # affection, trust, familiarity, dependency, safety, tension
-
-
-# ═══════════════════════════════════════════════════════════════
-# ⑤ Relationship Dynamics 矩阵
+# ③ Relationship Dynamics 矩阵
 # ═══════════════════════════════════════════════════════════════
 
 

@@ -1,174 +1,293 @@
-"""③ Dynamic Decay —— 人格驱动的动态衰减（纯稳态恢复）。
+"""Time-Aware Decay —— 时间感知状态衰减。
 
-衰减速率由以下因素动态调制:
-  - 人格基线: 高傲→记仇（恢复慢），情绪稳定→恢复快
-  - 关系语境: 信任高→压力消退快（安全基地效应）
-  - 急性状态: 高压下所有负面情绪消退变慢（压力锁定）
-  - 刺激-特质共振: 特定刺激遇到特定特质时，恢复进一步放缓
+基于情感动力学的时间衰减组件，以真实时间戳驱动状态向基线回归。
 
-稳定性保证:
-  - 所有 decay < 1.0 严格成立（contractive，向基线回归）
-  - decay = 1.0 表示零恢复（保持当前偏离量）
-  - 永远不会 > 1.0（不会背离基线，情绪自我增强由动力学 A 矩阵负责）
+学术基础:
+  - 指数衰减: Rutledge et al. (2014), Vanhasbroeck et al. (2024)
+  - 人格调制衰减率: Schuyler et al. (2014), Lücke et al. (2024)
+  - 多时间尺度: DER 模型 (Tanguy et al., 2007)
+  - 关系衰减: Bhattacharya et al. (2017), Pellegrini (1977)
 
-门控与衰减的协作:
-  - 紧门控 + 慢衰减 = 压抑爆炸型（进得少但放不下）
-  - 松门控 + 快衰减 = 表达恢复型（进得多但也放得下）
-  - 紧门控 + 快衰减 = 冷漠超然型
-  - 松门控 + 慢衰减 = 敏感内耗型
+核心公式:
+  decayed[s] = baseline[s] + (current[s] - baseline[s]) × exp(-λ_eff[s] × Δt)
 
-注意: 旧代码曾允许 decay > 1.0 作为"情绪自我增强"机制，
-已废弃——自我增强应通过跨维度耦合（A 矩阵）实现，
-不应通过破坏衰减的稳定语义来实现。
+其中 λ_eff 由维度基础衰减率、人格调制、时间曲线三者共同决定。
+
+与残差动力学的分工:
+  - apply_time_decay: 处理"无交互期间"的自然恢复/退化（由 Δt 驱动）
+  - update_all:        处理"有交互期间"的刺激响应（由 stimuli 驱动）
 """
 
+from dataclasses import dataclass, field
+from typing import Optional
 import numpy as np
 from state import (
+    # 内部状态索引
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
-    I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE,
+    I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
+    # 关系状态索引
     R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION,
-    T_SENSITIVITY, T_PRIDE, T_EMOTIONAL_STABILITY,
-    T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY,
+    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    # 特质索引
+    T_EMOTIONAL_STABILITY, T_OPTIMISM, T_ANXIETY_PRONENESS,
+    T_ANGER_REACTIVITY, T_EMOTIONAL_OPENNESS,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
-    ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT, ST_TEASING,
 )
 from ._utils import soft_clamp
-from ._matrices import _INTERNAL_BASE_DECAY, _RELATIONSHIP_BASE_DECAY
 
 
-# 衰减系数严格上界 — 保证永远向基线回归而非背离
-_MAX_INTERNAL_DECAY = 0.99   # 内部状态最快可接近"不恢复"但绝不能放大
-_MAX_RELATIONSHIP_DECAY = 0.999  # 关系状态同理，上界更接近 1（关系变化极慢）
-_MIN_INTERNAL_DECAY = 0.70
-_MIN_RELATIONSHIP_DECAY = 0.95
+# ═══════════════════════════════════════════════════════════════
+# 衰减配置
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass(frozen=True)
+class DecayConfig:
+    """时间衰减配置，可外部化为 JSON/YAML。"""
+
+    # ── 基础衰减率 λ_base (/小时) ──
+    # 内部状态: 小时级
+    internal_lambda: np.ndarray = field(default_factory=lambda: np.array([
+        0.35,  # I_ENERGY         — 精力, 半衰期 ~2h
+        0.23,  # I_STRESS         — 压力, ~3h
+        0.17,  # I_LONELINESS     — 孤独, ~4h
+        0.14,  # I_INSECURITY     — 不安全, ~5h
+        0.69,  # I_IRRITATION     — 烦躁, ~1h (最快)
+        0.12,  # I_LONGING        — 思念, ~6h (最慢)
+        0.35,  # I_SOCIAL_BATTERY — 社交电量, ~2h
+        0.23,  # I_MENTAL_FATIGUE — 精神疲劳, ~3h
+    ], dtype=np.float64))
+
+    # 关系状态: 天级 (λ 很小)
+    relationship_lambda: np.ndarray = field(default_factory=lambda: np.array([
+        0.0021,  # R_AFFECTION        — 好感, 半衰期 ~14d
+        0.0014,  # R_TRUST            — 信任, ~21d
+        0.0041,  # R_FAMILIARITY      — 熟悉, ~7d
+        0.0029,  # R_DEPENDENCY       — 依赖, ~10d
+        0.0021,  # R_EMOTIONAL_SAFETY — 情感安全, ~14d
+        0.0058,  # R_ROMANTIC_TENSION — 浪漫张力, ~5d
+    ], dtype=np.float64))
+
+    # ── 时间曲线参数 ──
+    # k: 衰减速率随 Δt 放缓的强度
+    # λ_eff = λ_base × personality_mod / (1 + k × Δt)
+    internal_time_curve_k: float = 0.05   # 内部: 弱放缓
+    relationship_time_curve_k: float = 0.001  # 关系: 几乎不额外放缓
+
+    # ── 最小时间间隔 (小时) ──
+    # 低于此值的间隔不触发衰减，避免每轮微小计算
+    min_delta_hours: float = 0.01  # ~36 秒
 
 
-def compute_dynamic_decay(
+# 默认配置单例
+DEFAULT_DECAY_CONFIG = DecayConfig()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 人格调制因子
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_internal_personality_mod(traits: np.ndarray) -> float:
+    """内部状态的人格调制因子。
+
+    返回值缩放 λ_base:
+      > 1.0 → 衰减更快 (情绪稳定的人恢复快)
+      < 1.0 → 衰减更慢 (高焦虑的人放不下)
+
+    文献: Schuyler et al. (2014) — 杏仁核恢复速度预测神经质;
+          Lücke et al. (2024) — 高神经质 → 更慢的压力恢复
+    """
+    t_dev = traits - 0.5
+
+    mod = 1.0
+    mod += t_dev[T_EMOTIONAL_STABILITY]  * 0.30   # 稳定→恢复快
+    mod += t_dev[T_OPTIMISM]            * 0.15   # 乐观→恢复快
+    mod -= t_dev[T_ANXIETY_PRONENESS]   * 0.25   # 焦虑→恢复慢
+    mod -= t_dev[T_ANGER_REACTIVITY]    * 0.10   # 易怒→恢复慢
+    mod += t_dev[T_EMOTIONAL_OPENNESS]  * 0.10   # 开放→恢复快
+
+    return soft_clamp(mod, 0.3, 2.0)  # 最快 2×, 最慢 0.3×
+
+
+def _compute_relationship_personality_mod(traits: np.ndarray) -> float:
+    """关系状态的人格调制因子。
+
+    文献: Bhattacharya et al. (2017) — 回避型更容易疏远;
+          Pellegrini (1977) — 依恋焦虑→放不下
+    """
+    t_dev = traits - 0.5
+
+    mod = 1.0
+    mod += t_dev[T_ATTACHMENT_AVOIDANCE]  * 0.35   # 回避→疏远快
+    mod -= t_dev[T_ATTACHMENT_ANXIETY]    * 0.20   # 焦虑→放不下
+    mod -= t_dev[T_EMOTIONAL_STABILITY]   * 0.10   # 稳定→关系稳定
+
+    return soft_clamp(mod, 0.3, 2.0)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 有效衰减率计算
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_lambda_effective(
+    lambda_base: np.ndarray,
+    personality_mod: float,
+    delta_hours: float,
+    time_curve_k: float,
+) -> np.ndarray:
+    """计算有效衰减率。
+
+    λ_eff[s] = λ_base[s] × personality_mod / (1 + time_curve_k × Δt)
+
+    时间曲线 1/(1+k·Δt):
+      - Δt → 0:    λ_eff ≈ λ_base × personality_mod  (全速衰减)
+      - Δt → ∞:    λ_eff → 0  (衰减速率趋零，模拟幂律尾)
+
+    文献: Hong & Zhang (2025) — 幂律衰减的长尾效应;
+          Vanhasbroeck et al. (2024) — 拟双曲衰减
+    """
+    time_damping = 1.0 / (1.0 + time_curve_k * delta_hours)
+    return lambda_base * personality_mod * time_damping
+
+
+# ═══════════════════════════════════════════════════════════════
+# 主 API
+# ═══════════════════════════════════════════════════════════════
+
+def apply_time_decay_internal(
+    current: np.ndarray,
+    setpoint: np.ndarray,
     traits: np.ndarray,
-    relationship: np.ndarray,
-    internal: np.ndarray,
-    stimuli: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """③ 人格驱动的动态衰减计算。
+    delta_hours: float,
+    config: DecayConfig = DEFAULT_DECAY_CONFIG,
+) -> np.ndarray:
+    """对内部状态应用时间衰减。
 
-    返回 (internal_decay, relationship_decay)，可能 > 1.0 表示情绪自我增强。
+    Args:
+        current: 当前内部状态 (8,)
+        setpoint: 人格决定的稳态基线 (8,)
+        traits: 人格特质 (10,)
+        delta_hours: 自上次更新以来的实际时间 (小时)
+        config: 衰减参数配置
+
+    Returns:
+        衰减后的内部状态 (8,)
     """
-    idcy = _INTERNAL_BASE_DECAY.copy()
-    rdcy = _RELATIONSHIP_BASE_DECAY.copy()
+    if delta_hours < config.min_delta_hours:
+        return current
 
-    # ── 人格调制 ──
-    # 自尊：高 → 烦躁消退慢（记仇），不安全感消退也慢（不愿承认脆弱）
-    pride_dev = traits[T_PRIDE] - 0.5
-    idcy[I_IRRITATION] += pride_dev * 0.12
-    idcy[I_INSECURITY] += pride_dev * 0.06
+    p_mod = _compute_internal_personality_mod(traits)
+    lam = _compute_lambda_effective(
+        config.internal_lambda, p_mod, delta_hours,
+        config.internal_time_curve_k,
+    )
 
-    # 情绪稳定：→ 所有负面情绪消退快
-    stability_dev = traits[T_EMOTIONAL_STABILITY] - 0.5
-    idcy[I_STRESS]       -= stability_dev * 0.15
-    idcy[I_IRRITATION]   -= stability_dev * 0.12
-    idcy[I_MENTAL_FATIGUE] -= stability_dev * 0.08
-    idcy[I_INSECURITY]   -= stability_dev * 0.08
-    idcy[I_LONELINESS]   -= stability_dev * 0.06
+    # 核心衰减公式
+    deviation = current - setpoint
+    decay_factor = np.exp(-lam * delta_hours)
+    decayed = setpoint + deviation * decay_factor
 
-    # 依恋焦虑：→ 不安全感/渴望消退慢（总怕被丢下）
-    attach_dev = traits[T_ATTACHMENT_ANXIETY] - 0.5
-    idcy[I_INSECURITY] += attach_dev * 0.10
-    idcy[I_LONGING]    += attach_dev * 0.08
-
-    # 乐观：→ 孤独/不安全感消退快（天然自我调节）
-    optimism_dev = traits[T_OPTIMISM] - 0.5
-    idcy[I_LONELINESS] -= optimism_dev * 0.08
-    idcy[I_INSECURITY] -= optimism_dev * 0.06
-
-    # 易怒：→ 烦躁消退慢
-    anger_dev = traits[T_ANGER_REACTIVITY] - 0.5
-    idcy[I_IRRITATION] += anger_dev * 0.10
-
-    # 敏感：→ 所有情绪体验更深，消退慢
-    sensitivity_dev = traits[T_SENSITIVITY] - 0.5
-    idcy[I_STRESS]     += sensitivity_dev * 0.04
-    idcy[I_LONELINESS] += sensitivity_dev * 0.04
-    idcy[I_INSECURITY] += sensitivity_dev * 0.04
-
-    # 依恋回避：→ 关系衰减加速（回避型更难建立深层关系）
-    avoidance_dev = traits[T_ATTACHMENT_AVOIDANCE] - 0.5
-    rdcy[R_AFFECTION]       -= avoidance_dev * 0.004
-    rdcy[R_TRUST]           -= avoidance_dev * 0.003
-    rdcy[R_EMOTIONAL_SAFETY] -= avoidance_dev * 0.003
-
-    # ── 关系调制 ──
-    # 信任高 → 压力/不安全感消退更快（安全基地效应）
-    idcy[I_STRESS]     -= relationship[R_TRUST] * 0.06
-    idcy[I_INSECURITY] -= relationship[R_EMOTIONAL_SAFETY] * 0.06
-    # 熟悉度高 → 关系状态更稳定
-    familiarity_bonus = relationship[R_FAMILIARITY] * 0.003
-    rdcy[R_AFFECTION] += familiarity_bonus
-    rdcy[R_TRUST]     += familiarity_bonus
-    # 情感安全高 → 关系各方面都更稳定
-    safety_bonus = relationship[R_EMOTIONAL_SAFETY] * 0.002
-    rdcy[R_AFFECTION]       += safety_bonus
-    rdcy[R_TRUST]           += safety_bonus
-    rdcy[R_EMOTIONAL_SAFETY] += safety_bonus
-    # 浪漫张力高 → 好感消退慢（越在意越放不下）
-    tension_effect = relationship[R_ROMANTIC_TENSION] * 0.002
-    rdcy[R_AFFECTION] += tension_effect
-
-    # ── 急性状态调制 ──
-    # 高压力 → 所有负面情绪消退变慢（压力锁定效应）
-    stress_penalty = internal[I_STRESS] * 0.04
-    idcy[I_IRRITATION] += stress_penalty
-    idcy[I_INSECURITY] += stress_penalty
-    idcy[I_LONELINESS] += stress_penalty * 0.5
-    # 精神疲劳 → 精力和社交电量恢复变慢
-    fatigue_penalty = internal[I_MENTAL_FATIGUE] * 0.04
-    idcy[I_ENERGY]        -= fatigue_penalty
-    idcy[I_SOCIAL_BATTERY] -= fatigue_penalty
-
-    # ── 刺激-特质共振（条件放大/加速消退） ──
-    # 被抛弃 + 高依恋焦虑 → 不安全感自我增强
-    if stimuli[ST_ABANDONMENT] > 0.3 and traits[T_ATTACHMENT_ANXIETY] > 0.55:
-        boost = stimuli[ST_ABANDONMENT] * traits[T_ATTACHMENT_ANXIETY] * 0.05
-        idcy[I_INSECURITY] += boost
-        idcy[I_LONELINESS] += boost * 0.6
-    # 被逗弄 + 高自尊 → 烦躁增强
-    if stimuli[ST_TEASING] > 0.2 and traits[T_PRIDE] > 0.55:
-        idcy[I_IRRITATION] += stimuli[ST_TEASING] * traits[T_PRIDE] * 0.06
-    # 冲突 + 高易怒 → 压力/烦躁共振放大
-    if stimuli[ST_CONFLICT] > 0.3 and traits[T_ANGER_REACTIVITY] > 0.55:
-        boost = stimuli[ST_CONFLICT] * traits[T_ANGER_REACTIVITY] * 0.05
-        idcy[I_IRRITATION] += boost
-        idcy[I_STRESS]     += boost * 0.5
-    # 被认可 + 高敏感 → 不安全感加速消退
-    if stimuli[ST_VALIDATION] > 0.3 and traits[T_SENSITIVITY] > 0.55:
-        idcy[I_INSECURITY] -= stimuli[ST_VALIDATION] * traits[T_SENSITIVITY] * 0.04
-    # 亲密靠近 + 高依恋焦虑 → 渴望消退变慢
-    if stimuli[ST_CLOSENESS] > 0.3 and traits[T_ATTACHMENT_ANXIETY] > 0.55:
-        idcy[I_LONGING] += stimuli[ST_CLOSENESS] * traits[T_ATTACHMENT_ANXIETY] * 0.04
-
-    # 最终 clamp — 严格 < 1.0，永不背离基线
-    idcy = soft_clamp(idcy, _MIN_INTERNAL_DECAY, _MAX_INTERNAL_DECAY)
-    rdcy = soft_clamp(rdcy, _MIN_RELATIONSHIP_DECAY, _MAX_RELATIONSHIP_DECAY)
-
-    return idcy, rdcy
+    return soft_clamp(decayed, 0.0, 1.0)
 
 
-def apply_decay(state: np.ndarray, decay: np.ndarray, baseline: np.ndarray) -> np.ndarray:
-    """③ 衰减：严格向基线回归（contractive mapping）。
+def apply_time_decay_relationship(
+    current: np.ndarray,
+    setpoint: np.ndarray,
+    traits: np.ndarray,
+    delta_hours: float,
+    config: DecayConfig = DEFAULT_DECAY_CONFIG,
+) -> np.ndarray:
+    """对关系状态应用时间衰减。
 
-    state[t] = baseline + (state[t-1] - baseline) × decay
+    Args:
+        current: 当前关系状态 (6,)
+        setpoint: 人格决定的关系稳态基线 (6,)
+        traits: 人格特质 (10,)
+        delta_hours: 自上次更新以来的实际时间 (小时)
+        config: 衰减参数配置
 
-    decay ∈ (0, 1) → 收缩向基线
-    decay = 1     → 保持不变（零恢复）
-    decay < 1 必成立（调用方保证），绝不背离基线。
-
-    情绪自我增强由动力学 A 矩阵的跨维度耦合负责，
-    不通过破坏衰减语义来实现。
+    Returns:
+        衰减后的关系状态 (6,)
     """
-    if not np.all(decay < 1.0):
-        violators = np.where(decay >= 1.0)[0]
-        raise ValueError(
-            f"衰减系数必须 < 1.0，发现违规维度: {violators.tolist()}, "
-            f"decay={decay[violators]}"
-        )
-    return soft_clamp(baseline + (state - baseline) * decay, 0.0, 1.0)
+    if delta_hours < config.min_delta_hours:
+        return current
+
+    p_mod = _compute_relationship_personality_mod(traits)
+    lam = _compute_lambda_effective(
+        config.relationship_lambda, p_mod, delta_hours,
+        config.relationship_time_curve_k,
+    )
+
+    deviation = current - setpoint
+    decay_factor = np.exp(-lam * delta_hours)
+    decayed = setpoint + deviation * decay_factor
+
+    return soft_clamp(decayed, 0.0, 1.0)
+
+
+def apply_time_decay(
+    current_internal: np.ndarray,
+    current_relationship: np.ndarray,
+    traits: np.ndarray,
+    delta_hours: float,
+    config: DecayConfig = DEFAULT_DECAY_CONFIG,
+) -> dict:
+    """对内部和关系状态同时应用时间衰减（便捷接口）。
+
+    Args:
+        current_internal: 当前内部状态 (8,)
+        current_relationship: 当前关系状态 (6,)
+        traits: 人格特质 (10,)
+        delta_hours: 自上次更新以来的实际时间 (小时)
+        config: 衰减参数配置
+
+    Returns:
+        {"internal_state": (8,), "relationship_state": (6,)}
+    """
+    internal_sp = _compute_setpoint_for_decay(traits)
+    rel_sp = _compute_rel_setpoint_for_decay(traits)
+
+    return {
+        "internal_state": apply_time_decay_internal(
+            current_internal, internal_sp, traits, delta_hours, config,
+        ),
+        "relationship_state": apply_time_decay_relationship(
+            current_relationship, rel_sp, traits, delta_hours, config,
+        ),
+    }
+
+
+# ── setpoint 计算 (与 _dynamics.py 保持同步) ──
+
+def _compute_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
+    """内部状态稳态基线 — 复制自 dynamics.compute_setpoint。"""
+    from state import DEFAULT_INTERNAL
+    sp = DEFAULT_INTERNAL.copy()
+    t_dev = traits - 0.5
+
+    sp[I_ENERGY]     += t_dev[T_OPTIMISM] * 0.15 - t_dev[T_ANXIETY_PRONENESS] * 0.08
+    sp[I_STRESS]     += t_dev[T_ANXIETY_PRONENESS] * 0.20 + t_dev[T_ANGER_REACTIVITY] * 0.05
+    sp[I_LONELINESS] += t_dev[T_ATTACHMENT_ANXIETY] * 0.10 - t_dev[T_OPTIMISM] * 0.05
+    sp[I_INSECURITY] += t_dev[T_ATTACHMENT_ANXIETY] * 0.20 + t_dev[T_ANXIETY_PRONENESS] * 0.10
+    sp[I_IRRITATION] += t_dev[T_ANGER_REACTIVITY] * 0.15 - t_dev[T_EMOTIONAL_STABILITY] * 0.10
+    sp[I_LONGING]    += t_dev[T_ATTACHMENT_ANXIETY] * 0.15
+    sp[I_SOCIAL_BATTERY] += t_dev[T_EMOTIONAL_STABILITY] * 0.05
+    sp[I_MENTAL_FATIGUE] -= t_dev[T_EMOTIONAL_STABILITY] * 0.08 + t_dev[T_ANXIETY_PRONENESS] * 0.05
+
+    return soft_clamp(sp, 0.05, 0.95)
+
+
+def _compute_rel_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
+    """关系状态稳态基线 — 复制自 dynamics.compute_rel_setpoint。"""
+    from state import DEFAULT_RELATIONSHIP
+    sp = DEFAULT_RELATIONSHIP.copy()
+    t_dev = traits - 0.5
+
+    sp[R_TRUST]             -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_AFFECTION]         -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.10
+    sp[R_DEPENDENCY]        -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_DEPENDENCY]        += t_dev[T_ATTACHMENT_ANXIETY] * 0.10
+    sp[R_EMOTIONAL_SAFETY]  -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.12
+    sp[R_FAMILIARITY]       -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.05
+    sp[R_ROMANTIC_TENSION]  += t_dev[T_ATTACHMENT_ANXIETY] * 0.05
+
+    return soft_clamp(sp, 0.02, 0.98)

@@ -5,8 +5,8 @@
 
 三个速率参数分别由不同的人格/关系/防御因素调制:
   α — 跨维度耦合速率 (traits + relationship)
-  β — 刺激接受速率    (defense profiles: attachment↑, suppression↓)
-  γ — 稳态恢复速率    (traits + suppression↓)
+  β — 刺激接受速率    (defense profiles: hyperactivation↑, deactivation↓)
+  γ — 稳态恢复速率    (traits + deactivation↓)
 
 门控不直接乘到状态值上，而是控制变化速率。
 这保证: ① 不同防御水平最终收敛到同一稳态（仅速度不同）
@@ -97,15 +97,14 @@ def update_internal_state(
         inner_stimuli: 防御过滤后的"里"刺激 (7,)
         traits: 人格特质 (10,)
         relationship: 关系状态 (6,)
-        profiles: 防御剖面 (3, 7)
+        profiles: 防御剖面 (2, 7)
         dt: 时间步长
 
     Returns:
         更新后的内部状态 h_t (8,)
     """
-    supp = profiles[0]
-    vuln = profiles[1]
-    att  = profiles[2]
+    deact = profiles[0]  # 去激活
+    hyper = profiles[1]  # 过度激活
 
     # ── α: 跨维度耦合速率 ──
     # 由 traits 决定。开放→耦合快，稳定→耦合慢（更独立），信任→耦合快。
@@ -117,20 +116,19 @@ def update_internal_state(
     alpha = soft_clamp(alpha, 0.02, 0.35)
 
     # ── β: 刺激接受速率 ──
-    # 由防御剖面决定。依恋→接受快，脆弱→接受快，压抑→接受慢。
+    # 由防御剖面决定。过度激活→接受快，去激活→接受慢。
     beta = 0.10
-    beta += att.mean() * 0.12
-    beta += vuln.mean() * 0.08
-    beta -= supp.mean() * 0.10
+    beta += hyper.mean() * 0.14
+    beta -= deact.mean() * 0.10
     beta = soft_clamp(beta, 0.01, 0.35)
 
     # ── γ: 稳态恢复速率 ──
-    # 稳定→恢复快，乐观→恢复快，焦虑→恢复慢，压抑→恢复慢（放不下）。
+    # 稳定→恢复快，乐观→恢复快，焦虑→恢复慢，去激活→恢复慢（放不下）。
     gamma = 0.08
     gamma += traits[T_EMOTIONAL_STABILITY] * 0.10
     gamma += traits[T_OPTIMISM] * 0.06
     gamma -= traits[T_ANXIETY_PRONENESS] * 0.06
-    gamma -= supp.mean() * 0.08  # 压抑的人更难恢复
+    gamma -= deact.mean() * 0.08  # 去激活高的人更难恢复（放不下）
     gamma = soft_clamp(gamma, 0.01, 0.25)
 
     # ── 构建三项 Δ ──

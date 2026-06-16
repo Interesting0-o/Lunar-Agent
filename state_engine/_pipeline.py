@@ -1,8 +1,13 @@
 """State Engine Pipeline —— 3 步管线编排。
 
-① 防御剖面 → inner/outer 刺激
+① 防御剖面 (deactivation / hyperactivation) → inner/outer 刺激
 ② 残差动力学 → 内部 + 关系状态更新（含稳态恢复）
 ③ 表面投影 → 可观测表达
+
+防御剖面基于 Bowlby (1980) 依恋防御二分法:
+  - Deactivation (去激活):  高回避 → 削减外在表达
+  - Hyperactivation (过度激活): 高焦虑 → 放大内心感受
+二者独立，形成 4 种防御模式: 铁壁、玻璃心、真淡定、纸墙。
 """
 
 from typing import Optional
@@ -42,6 +47,7 @@ def update_all(
 
     步骤:
       ① 防御剖面 → (inner_stimuli, outer_stimuli)
+         deactivation 控制 outer 削减，hyperactivation 控制 inner 放大
       ② 残差动力学（内部 + 关系，含内建稳态恢复）
       ③ 表面投影
 

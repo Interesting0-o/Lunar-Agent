@@ -1,12 +1,22 @@
-"""Defense Profiles —— 统一防御机制建模。
+"""Defense Profiles —— 二维防御机制建模。
 
-核心改进：每个防御机制不是全局标量，而是一个 7 维"敏感度剖面"——
-对不同类型的心理刺激有不同的激活程度。
+基于 Bowlby (1980) 的依恋防御二分法 + Richardson et al. (2023, 2025) 的实证验证:
 
-剖面 = trait_baseline(7) × relationship_modulation + internal_push
+  profiles[0, :] — Deactivation (去激活): 削减外在表达
+    高回避 → 情感疏离、压抑表达。关联特质: pride↑, avoidance↑, stability↓
+    由 suppression + 逆 vulnerability 合并而来。
 
-当前防御: suppression, vulnerability, attachment
-扩展方式: 新增一行 profile 即可，不影响现有门控。
+  profiles[1, :] — Hyperactivation (过度激活): 放大内心感受
+    高焦虑 → 放大关系威胁/亲近信号。关联特质: attachment_anxiety↑, jealousy↑
+    原 attachment 剖面。
+
+每个剖面是 7 维敏感度向量 ∈ [0, 1]，对不同类型的心理刺激独立激活。
+
+扩展方式: 增加新防御维度（如 boundary）需验证:
+  1. 概念判别效度 — 与 deactivation/hyperactivation 不是同一构念
+  2. 因子/相关性检查 — |r| < 0.3 才值得独立成维度
+  3. 交互机制 — 在 apply_defenses 中有不同于现有维度的数学操作
+验证通过后将 profiles 扩展为 (3, 7)，不影响现有逻辑。
 """
 
 import numpy as np
@@ -15,7 +25,7 @@ from state import (
     T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY, T_JEALOUSY_SENSITIVITY,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     I_STRESS, I_INSECURITY, I_LONELINESS, I_LONGING,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
+    R_AFFECTION, R_TRUST, R_FAMILIARITY,
     R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
@@ -28,98 +38,95 @@ def compute_defense_profiles(
     relationship: np.ndarray,
     internal: np.ndarray,
 ) -> np.ndarray:
-    """计算所有防御机制的逐维度敏感度剖面。
+    """计算二维防御剖面: 去激活 + 过度激活。
 
     Returns:
-        profiles: (3, 7) np.ndarray
-            profiles[0, :] — suppression: 压抑各类刺激外显的程度
-            profiles[1, :] — vulnerability: 允许各类刺激"泄露"到表面的程度
-            profiles[2, :] — attachment: 放大各类刺激内部感受的程度
+        profiles: (2, 7) np.ndarray
+            profiles[0, :] — deactivation: 削减各类刺激外在表达的程度
+            profiles[1, :] — hyperactivation: 放大各类刺激内心感受的程度
 
     每个剖面 ∈ [0, 1]，值越高 = 该防御对该类刺激越活跃。
     """
-    profiles = np.zeros((3, ST_SIZE), dtype=np.float64)
+    profiles = np.zeros((2, ST_SIZE), dtype=np.float64)
     t_dev = traits - 0.5  # 特质偏离中性
 
-    # ═══════════════════════════════════════════
-    # Profile 0 — Suppression（压抑）
-    #   高 Pride → 压抑"暴露脆弱"的刺激（被抛弃、被认可、依赖）
-    #   高 Anger → 压抑冲突（虽然生气但压着）
-    #   高 Stability → 全局压抑低（情绪稳定的人不压抑，是真淡定）
-    # ═══════════════════════════════════════════
-    supp = np.zeros(ST_SIZE, dtype=np.float64)
+    # ═══════════════════════════════════════════════════════════
+    # Profile 0 — Deactivation (去激活)
+    #
+    #   合并了原 suppression + 逆 vulnerability:
+    #     - 高 Pride → 隐藏"暴露脆弱"的刺激（被抛弃、被认可、依赖）
+    #     - 高 Avoidance → 全局情感疏离
+    #     - 高 Stability → 全局去激活低（真淡定，不是装的）
+    #     - 高 Openness → 去激活低（愿意流露）
+    #     - 低 Trust / 低 Safety → 去激活高（不信任时不示弱）
+    #     - 高 Stress / 高 Insecurity → 去激活高（越难受越藏）
+    #
+    #   Bowlby: 去激活策略 = 情感疏离 + 最小化痛苦表达 + 转移注意力
+    #   Richardson (2023): 回避独有防御 —— distancing, disengagement, vulnerability suppression
+    # ═══════════════════════════════════════════════════════════
+    deact = np.zeros(ST_SIZE, dtype=np.float64)
 
-    # 人格基线
-    supp[ST_ABANDONMENT] = 0.35 + t_dev[T_PRIDE] * 0.50 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.20
-    supp[ST_VALIDATION]  = 0.25 + t_dev[T_PRIDE] * 0.40
-    supp[ST_DEPENDENCY]  = 0.30 + t_dev[T_PRIDE] * 0.40 + t_dev[T_ATTACHMENT_AVOIDANCE] * 0.20
-    supp[ST_CLOSENESS]   = 0.15 + t_dev[T_PRIDE] * 0.20
-    supp[ST_CONFLICT]    = 0.20 + t_dev[T_PRIDE] * 0.30 + t_dev[T_ANGER_REACTIVITY] * 0.25
-    supp[ST_TEASING]     = 0.20 + t_dev[T_PRIDE] * 0.35
-    supp[ST_EMOTIONAL_WEIGHT] = 0.25 + t_dev[T_PRIDE] * 0.30
-    # 情绪稳定 → 全局压低压抑（不需要压抑，是真稳定）
-    supp -= t_dev[T_EMOTIONAL_STABILITY] * 0.20
+    # 人格基线: 每种刺激天然被隐藏的程度不同
+    deact[ST_ABANDONMENT] = 0.30 + t_dev[T_PRIDE] * 0.45 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.18
+    deact[ST_VALIDATION]  = 0.25 + t_dev[T_PRIDE] * 0.40
+    deact[ST_DEPENDENCY]  = 0.28 + t_dev[T_PRIDE] * 0.38 + t_dev[T_ATTACHMENT_AVOIDANCE] * 0.20
+    deact[ST_CLOSENESS]   = 0.15 + t_dev[T_PRIDE] * 0.18 + t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
+    deact[ST_CONFLICT]    = 0.20 + t_dev[T_PRIDE] * 0.28 + t_dev[T_ANGER_REACTIVITY] * 0.22
+    deact[ST_TEASING]     = 0.20 + t_dev[T_PRIDE] * 0.32
+    deact[ST_EMOTIONAL_WEIGHT] = 0.25 + t_dev[T_PRIDE] * 0.28
 
-    # 关系调制: 信任和安全感松动压抑
-    rel_loosen = 1.0 - relationship[R_TRUST] * 0.25 - relationship[R_EMOTIONAL_SAFETY] * 0.18
-    supp *= rel_loosen
+    # 去激活调制器（全局）
+    # 情绪稳定 → 真淡定，不需要去激活
+    deact -= t_dev[T_EMOTIONAL_STABILITY] * 0.22
+    # 情绪开放 → 愿意流露，去激活低
+    deact -= t_dev[T_EMOTIONAL_OPENNESS] * 0.12
+    # 依恋回避 → 全局增强去激活（情感疏离是回避的核心特征）
+    deact += t_dev[T_ATTACHMENT_AVOIDANCE] * 0.18
 
-    # 内部急性推动: 压力/不安 → 更压抑
-    supp += internal[I_STRESS] * 0.10 + internal[I_INSECURITY] * 0.08
+    # 关系调制: 信任和情感安全感降低去激活（安全基地效应）
+    rel_loosen = 1.0 - relationship[R_TRUST] * 0.22 - relationship[R_EMOTIONAL_SAFETY] * 0.18
+    deact *= rel_loosen
 
-    profiles[0] = _sigmoid(supp - 0.50)
+    # 内部急性推动: 压力和不安加剧去激活（越难受越藏）
+    deact += internal[I_STRESS] * 0.10 + internal[I_INSECURITY] * 0.08
 
-    # ═══════════════════════════════════════════
-    # Profile 1 — Vulnerability（脆弱/示弱）
-    #   高 Sensitivity → 更容易被情感连接触动
-    #   高 Openness → 更愿意示弱
-    #   低 Pride → 不介意暴露脆弱
-    # ═══════════════════════════════════════════
-    vuln = np.zeros(ST_SIZE, dtype=np.float64)
+    profiles[0] = _sigmoid(deact - 0.48)
 
-    vuln[ST_VALIDATION]  = 0.30 + t_dev[T_SENSITIVITY] * 0.50 + t_dev[T_EMOTIONAL_OPENNESS] * 0.30
-    vuln[ST_CLOSENESS]   = 0.40 + t_dev[T_SENSITIVITY] * 0.40 + t_dev[T_EMOTIONAL_OPENNESS] * 0.30
-    vuln[ST_DEPENDENCY]  = 0.30 + t_dev[T_SENSITIVITY] * 0.40
-    vuln[ST_ABANDONMENT] = 0.15 + t_dev[T_SENSITIVITY] * 0.30
-    vuln[ST_CONFLICT]    = 0.10
-    vuln[ST_TEASING]     = 0.15 + t_dev[T_SENSITIVITY] * 0.10
-    vuln[ST_EMOTIONAL_WEIGHT] = 0.25 + t_dev[T_SENSITIVITY] * 0.30
-    # 高自尊 → 全局压制脆弱
-    vuln -= t_dev[T_PRIDE] * 0.25
+    # ═══════════════════════════════════════════════════════════
+    # Profile 1 — Hyperactivation (过度激活)
+    #
+    #   原 attachment 剖面:
+    #     - 高 Attachment Anxiety → 放大"关系威胁/亲近"刺激
+    #     - 高 Jealousy → 对被抛弃更敏感
+    #     - 低 Avoidance → 不回避亲密信号
+    #     - 高 Sensitivity → 全局更敏感
+    #
+    #   Bowlby: 过度激活策略 = 夸大痛苦表达 + 持续监控 + 投射
+    #   Richardson (2023): 焦虑独有防御 —— splitting, projective identification,
+    #     anticipation, acting out, passive-aggression, reaction formation
+    # ═══════════════════════════════════════════════════════════
+    hyper = np.zeros(ST_SIZE, dtype=np.float64)
 
-    # 关系调制: 情感安全和熟悉鼓励示弱
-    vuln *= 1.0 + relationship[R_EMOTIONAL_SAFETY] * 0.20 + relationship[R_FAMILIARITY] * 0.12
+    hyper[ST_ABANDONMENT] = 0.45 + t_dev[T_ATTACHMENT_ANXIETY] * 0.55 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.30
+    hyper[ST_CLOSENESS]   = 0.30 + t_dev[T_ATTACHMENT_ANXIETY] * 0.50
+    hyper[ST_DEPENDENCY]  = 0.35 + t_dev[T_ATTACHMENT_ANXIETY] * 0.40
+    hyper[ST_VALIDATION]  = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.20
+    hyper[ST_CONFLICT]    = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
+    hyper[ST_TEASING]     = 0.10 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.20
+    hyper[ST_EMOTIONAL_WEIGHT] = 0.20 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
 
-    # 内部急性推动: 孤独/渴望 → 更想示弱（想被注意到）
-    vuln += internal[I_LONELINESS] * 0.12 + internal[I_LONGING] * 0.10
+    # 敏感度: 全局增强过度激活（敏感的人所有刺激都感受更深）
+    hyper += t_dev[T_SENSITIVITY] * 0.08
+    # 依恋回避 → 全局降低过度激活（回避型抑制依恋系统激活）
+    hyper -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.30
 
-    profiles[1] = _sigmoid(vuln - 0.45)
-
-    # ═══════════════════════════════════════════
-    # Profile 2 — Attachment（依恋敏感）
-    #   高 Attachment Anxiety → 放大"关系威胁/亲近"刺激
-    #   高 Jealousy → 被抛弃更敏感
-    #   低 Avoidance → 不回避亲密信号
-    # ═══════════════════════════════════════════
-    att = np.zeros(ST_SIZE, dtype=np.float64)
-
-    att[ST_ABANDONMENT] = 0.45 + t_dev[T_ATTACHMENT_ANXIETY] * 0.55 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.30
-    att[ST_CLOSENESS]   = 0.30 + t_dev[T_ATTACHMENT_ANXIETY] * 0.50
-    att[ST_DEPENDENCY]  = 0.35 + t_dev[T_ATTACHMENT_ANXIETY] * 0.40
-    att[ST_VALIDATION]  = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.20
-    att[ST_CONFLICT]    = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
-    att[ST_TEASING]     = 0.10 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.20
-    att[ST_EMOTIONAL_WEIGHT] = 0.20 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
-    # 依恋回避 → 全局降低依恋敏感
-    att -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.30
-
-    # 关系调制: 好感/浪漫张力 → 放大依恋
-    att *= 1.0 + relationship[R_AFFECTION] * 0.18 + relationship[R_ROMANTIC_TENSION] * 0.10
+    # 关系调制: 好感/浪漫张力 → 放大依恋系统的反应
+    hyper *= 1.0 + relationship[R_AFFECTION] * 0.18 + relationship[R_ROMANTIC_TENSION] * 0.10
 
     # 内部急性推动: 不安全感/渴望 → 依恋系统激活
-    att += internal[I_INSECURITY] * 0.12 + internal[I_LONGING] * 0.08
+    hyper += internal[I_INSECURITY] * 0.12 + internal[I_LONGING] * 0.08
 
-    profiles[2] = _sigmoid(att - 0.50)
+    profiles[1] = _sigmoid(hyper - 0.50)
 
     return soft_clamp(profiles, 0.0, 1.0)
 
@@ -128,30 +135,35 @@ def apply_defenses(
     stimuli: np.ndarray,
     profiles: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """应用防御剖面，生成 inner / outer 刺激。
+    """应用二维防御剖面，生成 inner / outer 刺激。
 
     每一类心理刺激经过其对应的防御剖面维度:
-      - inner[s] = stimuli[s] × (1 + attachment[s] × gain)
-      - outer[s] = inner[s] × (1 − suppression[s]) × vulnerability_leak[s]
 
-    suppression / vulnerability / attachment 现在都是 7 维向量，
-    每维独立作用于对应的刺激类型。
+      inner[s]  = stimuli[s] × (1 + hyperactivation[s] × 0.50)
+        → 过度激活放大内心感受: "我比看起来更在意"
+
+      outer[s]  = inner[s] × (1 − deactivation[s] × 0.70)
+        → 去激活削减外在表达: "我不想让人看出来"
+
+    deactivation 控制 outer 削减，hyperactivation 控制 inner 放大。
+    两者独立——可以内心翻江倒海但表面波澜不惊（高 hyper + 高 deact），
+    也可以内心平静且表里如一（低 hyper + 低 deact）。
+
+    Args:
+        stimuli: 原始心理刺激 (7,)
+        profiles: 防御剖面 (2, 7)
 
     Returns:
-        (inner_stimuli, outer_stimuli) — 均为 7 维
+        (inner_stimuli, outer_stimuli) — 均为 (7,)
     """
-    supp = profiles[0]  # (7,)
-    vuln = profiles[1]  # (7,)
-    att  = profiles[2]  # (7,)
+    deact = profiles[0]  # (7,)
+    hyper = profiles[1]  # (7,)
 
-    # Inner: 依恋敏感放大特定刺激的内部感受
-    inner = stimuli * (1.0 + att * 0.50)
+    # Inner: 过度激活放大内心感受
+    inner = stimuli * (1.0 + hyper * 0.50)
 
-    # Outer: 从 inner 出发，经压抑衰减和脆弱泄露
-    #   压抑: 高 suppression[s] → outer[s] 被大幅削减（"口是心非"）
-    #   脆弱: 高 vulnerability[s] → 部分 bypass 压抑（"忍不住流露"）
-    outer = inner * (1.0 - supp * 0.70)
-    outer = outer * (0.30 + vuln * 0.70)  # vuln 高时接近原始，低时只剩 30%
+    # Outer: 去激活削减外在表达
+    outer = inner * (1.0 - deact * 0.70)
 
     inner = soft_clamp(inner, 0.0, 1.0)
     outer = soft_clamp(outer, 0.0, 1.0)
