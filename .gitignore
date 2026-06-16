@@ -10,6 +10,7 @@ langgraph.json
 # Virtual environments
 .venv
 .langgraph_api
+.claude
+
 .env
 CLAUDE.md
-.claude
