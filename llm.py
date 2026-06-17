@@ -2,8 +2,12 @@
 import os
 import dotenv
 from langchain.chat_models import init_chat_model
+from langchain_ollama import OllamaEmbeddings
 
 dotenv.load_dotenv()
+
+# Ollama 默认地址：优先读环境变量，fallback 到 WSL 可访问的 Windows 宿主机
+_OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://172.18.96.1:11434")
 
 model = init_chat_model(
     model="deepseek-v4-pro",
@@ -12,15 +16,21 @@ model = init_chat_model(
     api_key=os.environ.get("DEEPSEEK_API_KEY"),
 )
 
-# perception_model = init_chat_model(
-#     model="qwen2.5:7b",
-#     model_provider="ollama",
-#     base_url="http://localhost:11434",
-#     api_key="",
-# )
+perception_model = init_chat_model(
+    model="qwen2.5:7b",
+    model_provider="ollama",
+    base_url=_OLLAMA_URL,
+    api_key="",
+)
 
-preception_model = model
+memory_summry_model = init_chat_model(
+    model="qwen2.5:7b",
+    model_provider="ollama",
+    base_url=_OLLAMA_URL,
+    api_key="",
+)
 
-
-if __name__ == "__main__":
-    print(model.invoke("你好，请简短介绍你自己"))
+embeddings = OllamaEmbeddings(
+    model="qwen3-embedding:8b", 
+    base_url=_OLLAMA_URL, 
+)

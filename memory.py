@@ -8,7 +8,7 @@
 Usage:
     from memory import MemoryNode, MemoryStore, search_by_internal_state
 
-    store = MemoryStore("db/memories.json")
+    store = MemoryStore("memories")
     node = MemoryNode(
         title="关于一起看红月的对话",
         content="用户说下次一起去看红月，角色害羞地答应了...",
@@ -43,9 +43,13 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
+from langchain_core.messages import BaseMessage
 import numpy as np
 from pydantic import BaseModel, Field, field_serializer, field_validator
+
+
+class MemoryMessage(BaseMessage):
+    type:str = "memory"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -193,15 +197,8 @@ def cos_similarity(a: np.ndarray, b: np.ndarray) -> float:
 # Embedding — 文本语义嵌入
 # ═══════════════════════════════════════════════════════════════
 
-# 默认 Ollama embedding 模型及地址
-_DEFAULT_EMBED_MODEL = "nomic-embed-text"
-_DEFAULT_OLLAMA_URL = "http://localhost:11434"
-
-
 def compute_embedding(
     text: str,
-    model: str = _DEFAULT_EMBED_MODEL,
-    base_url: str = _DEFAULT_OLLAMA_URL,
 ) -> Optional[np.ndarray]:
     """通过 Ollama 生成文本的语义嵌入向量。
 
@@ -220,15 +217,12 @@ def compute_embedding(
         return None
 
     try:
-        from langchain_ollama import OllamaEmbeddings
-
-        embeddings = OllamaEmbeddings(model=model, base_url=base_url)
+        from llm import embeddings
         vector = embeddings.embed_query(text)
         return np.array(vector, dtype=np.float64)
-    except Exception:
+    except Exception as e:
         logging.getLogger(__name__).warning(
-            "Embedding 生成失败（model=%s, base_url=%s）请确认 Ollama 已运行且已拉取模型",
-            model, base_url,
+            "Embedding 生成失败: %s", e,
         )
         return None
 
@@ -244,19 +238,21 @@ class MemoryStore:
     使用原子写入（先写临时文件再 rename）保证已有数据不损坏。
 
     Usage:
-        store = MemoryStore("db/memories.json")
+        store = MemoryStore("memories")
         nodes = store.get_all()
         store.add(node)
         results = store.search_by_internal_state(current_internal, top_k=3)
     """
 
-    def __init__(self, filepath: str):
+    def __init__(self, memory_id: str):
         """初始化存储。
 
         Args:
-            filepath: JSON 文件路径。目录不存在时会在首次 save() 时自动创建。
+            memory_id: 唯一记忆标识，对应文件 memory/{memory_id}.json。
+                      目录不存在时会在首次 save() 时自动创建。
         """
-        self.filepath = Path(filepath)
+        self.memory_id = memory_id
+        self.filepath = Path(f"memory/{memory_id}.json")
 
     # ── 持久化 ──
 
@@ -407,8 +403,6 @@ class MemoryStore:
         query_text: str,
         top_k: int = 3,
         threshold: float = 0.0,
-        embedding_model: str = _DEFAULT_EMBED_MODEL,
-        embedding_base_url: str = _DEFAULT_OLLAMA_URL,
     ) -> List[Tuple[MemoryNode, float]]:
         """基于文本语义嵌入的余弦相似度检索。
 
@@ -428,7 +422,7 @@ class MemoryStore:
         if not query_text:
             return []
 
-        query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+        query_embedding = compute_embedding(query_text)
         if query_embedding is None:
             return []
 
@@ -455,9 +449,7 @@ class MemoryStore:
         state_weight: float = 0.5,
         embedding_weight: float = 0.5,
         top_k: int = 3,
-        threshold: float = 0.0,
-        embedding_model: str = _DEFAULT_EMBED_MODEL,
-        embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+        threshold: float = 0.0 
     ) -> List[Tuple[MemoryNode, float]]:
         """混合检索：向量查询 + Embedding 查询的加权组合。
 
@@ -484,7 +476,7 @@ class MemoryStore:
         if not query_text:
             return self.search_by_internal_state(query_internal, top_k, threshold)
 
-        query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+        query_embedding = compute_embedding(query_text)
 
         nodes = self.load()
         if not nodes:
@@ -529,18 +521,16 @@ class MemoryStore:
     # ── 按文件路径的工厂方法 ──
 
     @classmethod
-    def from_file(cls, filepath: str) -> "MemoryStore":
-        """从文件路径创建 MemoryStore 并立即返回已加载的实例。
-
-        等价于 MemoryStore(filepath)，但语义更明确。
+    def from_id(cls, memory_id: str) -> "MemoryStore":
+        """从 memory_id 创建 MemoryStore。
 
         Args:
-            filepath: JSON 文件路径。
+            memory_id: 唯一记忆标识。
 
         Returns:
             MemoryStore 实例。
         """
-        return cls(filepath)
+        return cls(memory_id)
 
     def __len__(self) -> int:
         return self.count()
@@ -553,18 +543,18 @@ class MemoryStore:
 # 便捷函数：脱离 MemoryStore 使用
 # ═══════════════════════════════════════════════════════════════
 
-def load_memories(filepath: str) -> List[MemoryNode]:
-    """从文件路径加载所有记忆节点。
+def load_memories(memory_id: str) -> List[MemoryNode]:
+    """加载指定 memory_id 对应的所有记忆节点。
 
-    便捷函数，等价于 MemoryStore(filepath).load()。
+    便捷函数，等价于 MemoryStore(memory_id).load()。
 
     Args:
-        filepath: JSON 文件路径。
+        memory_id: 唯一记忆标识。
 
     Returns:
         记忆节点列表（可能为空）。
     """
-    return MemoryStore(filepath).load()
+    return MemoryStore(memory_id).load()
 
 
 def search_by_internal_state(
@@ -606,9 +596,7 @@ def search_by_embedding(
     query_text: str,
     nodes: List[MemoryNode],
     top_k: int = 3,
-    threshold: float = 0.0,
-    embedding_model: str = _DEFAULT_EMBED_MODEL,
-    embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+    threshold: float = 0.0
 ) -> List[Tuple[MemoryNode, float]]:
     """在给定的记忆节点列表中，按文本语义嵌入余弦相似度检索。
 
@@ -628,7 +616,7 @@ def search_by_embedding(
     if not nodes or not query_text:
         return []
 
-    query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+    query_embedding = compute_embedding(query_text)
     if query_embedding is None:
         return []
 
@@ -652,9 +640,7 @@ def hybrid_search(
     state_weight: float = 0.5,
     embedding_weight: float = 0.5,
     top_k: int = 3,
-    threshold: float = 0.0,
-    embedding_model: str = _DEFAULT_EMBED_MODEL,
-    embedding_base_url: str = _DEFAULT_OLLAMA_URL,
+    threshold: float = 0.0 
 ) -> List[Tuple[MemoryNode, float]]:
     """在给定的记忆节点列表中，进行向量 + Embedding 加权混合检索。
 
@@ -678,7 +664,7 @@ def hybrid_search(
     if not nodes:
         return []
 
-    query_embedding = compute_embedding(query_text, embedding_model, embedding_base_url)
+    query_embedding = compute_embedding(query_text)
 
     scored: List[Tuple[MemoryNode, float]] = []
     for node in nodes:

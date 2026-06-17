@@ -1,11 +1,14 @@
 {
   "messages": [],
-  "surface_state": [0.65, 0.72, 0.15, 0.68, 0.45, 0.55, 0.52],
-  "traits": [0.75, 0.40, 0.70, 0.35, 0.50, 0.65, 0.30, 0.40, 0.60, 0.35],
-  "internal_state": [0.30, 0.65, 0.55, 0.60, 0.25, 0.45, 0.35, 0.70],
-  "relationship_state": [0.55, 0.65, 0.70, 0.40, 0.55, 0.25],
-  "user_signals": [0.60, 0.55, 0.45, 0.35, 0.05, 0.10, 0.40, 0.15, 0.05],
-  "user_interaction_impact": [0.55, 0.50, 0.10, 0.15],
+  "memory_id": "main",
+  
+  "surface_state": [0.60, 0.65, 0.15, 0.62, 0.55, 0.58, 0.35],
+  "traits": [0.70, 0.65, 0.60, 0.50, 0.55, 0.60, 0.50, 0.70, 0.55, 0.20],
+  "internal_state": [0.70, 0.20, 0.30, 0.25, 0.10, 0.40, 0.60, 0.15],
+  "relationship_state": [0.30, 0.30, 0.20, 0.15, 0.25, 0.20],
+
+  "user_stimuli": null,
+  "state_description": null,
   "has_inject_system_prompt": false,
   "error": false
 }

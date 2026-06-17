@@ -195,6 +195,25 @@ GateVector = np.ndarray             # 4 维，用 G_* 索引
 # ═══════════════════════════════════════════════════════════════
 
 
+def _strip_json_fence(text: str) -> str:
+    """剥除 LLM 输出中常见的 ```json ... ``` 包裹，返回纯 JSON 文本。
+
+    同时处理：
+      - ```json\\n{...}\\n```
+      - ```\\n{...}\\n```
+      - 首尾空白
+    已是纯 JSON 时原样返回。
+    """
+    import re
+
+    s = text.strip()
+    # 去开头的 ``` 及可选的语言标记
+    s = re.sub(r"^```(?:json)?\s*", "", s)
+    # 去末尾的 ```
+    s = re.sub(r"\s*```\s*$", "", s)
+    return s.strip()
+
+
 def _dict_to_array(d: dict, label_idx: dict, size: int) -> np.ndarray:
     """将键值对字典转换为对应长度的 numpy 数组。
 
@@ -221,6 +240,7 @@ def stimuli_from_dict(d: dict) -> np.ndarray:
 class State(TypedDict):
     """顶层状态——聚合所有子状态，作为图节点的消息传递载体。"""
     messages: Annotated[List, add_messages]
+    memory_id:str
 
     # ── 角色自身的内部状态（所有层级） ──
     surface_state: Optional[_Array]

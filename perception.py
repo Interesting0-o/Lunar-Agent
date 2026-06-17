@@ -73,11 +73,9 @@ def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
             raw = perception_model.invoke(msgs)
             text = raw.content.strip()  # type: ignore
 
-            # 抹掉 ```json ... ``` 包裹
-            if text.startswith("```"):
-                text = text.strip("`").strip()
-                if text.startswith("json"):
-                    text = text[4:].strip()
+            # 统一剥除 ```json ... ``` 包裹
+            from state import _strip_json_fence
+            text = _strip_json_fence(text)
 
             data = json.loads(text)
 

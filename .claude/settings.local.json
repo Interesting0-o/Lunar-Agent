@@ -2,7 +2,33 @@
   "permissions": {
     "allow": [
       "Bash(.venv/Scripts/python.exe *)",
-      "Bash(uv --version)"
+      "Bash(uv --version)",
+      "WebSearch",
+      "Skill(deep-research)",
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:blog.getzep.com)",
+      "WebFetch(domain:ar5iv.labs.arxiv.org)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:web3.arxiv.org)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:papers.cool)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:langchain-ai.github.io)",
+      "WebFetch(domain:www.marktechpost.com)",
+      "WebFetch(domain:blog.csdn.net)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:stevekinney.com)",
+      "WebFetch(domain:huggingface.co)",
+      "Bash(curl -sL \"https://ar5iv.labs.arxiv.org/html/2512.20237\")",
+      "WebFetch(domain:epium.com)",
+      "WebFetch(domain:www.semanticscholar.org)",
+      "WebFetch(domain:techgig.com)",
+      "WebFetch(domain:tldr.takara.ai)",
+      "WebFetch(domain:export.arxiv.org)",
+      "WebFetch(domain:www.langchain.com)",
+      "WebFetch(domain:www.digitalocean.com)",
+      "WebFetch(domain:changelog.langchain.com)"
     ]
   }
 }
