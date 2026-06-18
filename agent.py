@@ -8,12 +8,11 @@ agent —— TUI 交互入口
 import dotenv
 import sqlite3
 import logging
-from graph import compiled_graph, graph_builder
+from graph import graph_builder
 
 dotenv.load_dotenv()
 
 logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
 
 
 def tui_test():

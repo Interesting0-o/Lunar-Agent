@@ -29,7 +29,11 @@
       "WebFetch(domain:www.langchain.com)",
       "WebFetch(domain:www.digitalocean.com)",
       "WebFetch(domain:changelog.langchain.com)",
-      "Bash(uv add *)"
+      "Bash(uv add *)",
+      "WebFetch(domain:zenodo.org)",
+      "WebFetch(domain:hexdocs.pm)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'docs: 更新STATE_ENGINE_TEST_REPORT反映架构变更 *)"
     ]
   }
 }

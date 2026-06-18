@@ -4,7 +4,7 @@ nodes —— LangGraph 图节点函数
 所有图节点实现在此，agent.py 只负责注册和连线。
 
 注意：state 中存储的 np.ndarray 在通过 JSON 序列化/反序列化
-（如 test.json 加载、SQLite checkpoint 恢复）后可能变为 Python list，
+（如 SQLite checkpoint 恢复）后可能变为 Python list，
 所有 node 函数在读取 state 时负责确保类型正确。
 """
 

@@ -43,13 +43,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from langchain_core.messages import BaseMessage
 import numpy as np
 from pydantic import BaseModel, Field, field_serializer, field_validator
-
-
-class MemoryMessage(BaseMessage):
-    type:str = "memory"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -207,8 +202,6 @@ def compute_embedding(
 
     Args:
         text: 待编码的文本。
-        model: Ollama embedding 模型名，如 "nomic-embed-text"、"bge-m3"、"mxbai-embed-large"。
-        base_url: Ollama 服务地址。
 
     Returns:
         embedding 向量，或 None（生成失败时）。
@@ -413,8 +406,6 @@ class MemoryStore:
             query_text: 查询文本，用于生成语义嵌入。
             top_k: 最多返回的结果数。
             threshold: 最低相似度阈值 [0, 1]。
-            embedding_model: Ollama embedding 模型名。
-            embedding_base_url: Ollama 服务地址。
 
         Returns:
             (记忆节点, 相似度) 列表，按相似度降序排列。
@@ -449,7 +440,7 @@ class MemoryStore:
         state_weight: float = 0.5,
         embedding_weight: float = 0.5,
         top_k: int = 3,
-        threshold: float = 0.0 
+        threshold: float = 0.0
     ) -> List[Tuple[MemoryNode, float]]:
         """混合检索：向量查询 + Embedding 查询的加权组合。
 
@@ -467,8 +458,6 @@ class MemoryStore:
             embedding_weight: 文本嵌入相似度权重。
             top_k: 最多返回的结果数。
             threshold: 最低综合得分阈值 [0, 1]。
-            embedding_model: Ollama embedding 模型名。
-            embedding_base_url: Ollama 服务地址。
 
         Returns:
             (记忆节点, 综合得分) 列表，按得分降序排列。
@@ -518,20 +507,6 @@ class MemoryStore:
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored[:top_k]
 
-    # ── 按文件路径的工厂方法 ──
-
-    @classmethod
-    def from_id(cls, memory_id: str) -> "MemoryStore":
-        """从 memory_id 创建 MemoryStore。
-
-        Args:
-            memory_id: 唯一记忆标识。
-
-        Returns:
-            MemoryStore 实例。
-        """
-        return cls(memory_id)
-
     def __len__(self) -> int:
         return self.count()
 
@@ -540,22 +515,8 @@ class MemoryStore:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 便捷函数：脱离 MemoryStore 使用
+# 便捷函数：脱离 MemoryStore 实例使用的独立检索函数
 # ═══════════════════════════════════════════════════════════════
-
-def load_memories(memory_id: str) -> List[MemoryNode]:
-    """加载指定 memory_id 对应的所有记忆节点。
-
-    便捷函数，等价于 MemoryStore(memory_id).load()。
-
-    Args:
-        memory_id: 唯一记忆标识。
-
-    Returns:
-        记忆节点列表（可能为空）。
-    """
-    return MemoryStore(memory_id).load()
-
 
 def search_by_internal_state(
     query_internal: np.ndarray,
@@ -607,8 +568,6 @@ def search_by_embedding(
         nodes: 记忆节点列表。
         top_k: 最多返回的结果数。
         threshold: 最低相似度阈值 [0, 1]。
-        embedding_model: Ollama embedding 模型名。
-        embedding_base_url: Ollama 服务地址。
 
     Returns:
         (记忆节点, 相似度) 列表，按相似度降序排列。
@@ -640,7 +599,7 @@ def hybrid_search(
     state_weight: float = 0.5,
     embedding_weight: float = 0.5,
     top_k: int = 3,
-    threshold: float = 0.0 
+    threshold: float = 0.0
 ) -> List[Tuple[MemoryNode, float]]:
     """在给定的记忆节点列表中，进行向量 + Embedding 加权混合检索。
 
@@ -655,8 +614,6 @@ def hybrid_search(
         embedding_weight: 文本嵌入相似度权重。
         top_k: 最多返回的结果数。
         threshold: 最低综合得分阈值 [0, 1]。
-        embedding_model: Ollama embedding 模型名。
-        embedding_base_url: Ollama 服务地址。
 
     Returns:
         (记忆节点, 综合得分) 列表，按得分降序排列。
