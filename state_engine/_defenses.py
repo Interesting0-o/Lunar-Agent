@@ -22,10 +22,10 @@
 import numpy as np
 from state import (
     T_SENSITIVITY, T_PRIDE, T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
-    T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY, T_JEALOUSY_SENSITIVITY,
+    T_ANGER_REACTIVITY, T_JEALOUSY_SENSITIVITY,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
-    I_STRESS, I_INSECURITY, I_LONELINESS, I_LONGING,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY,
+    I_STRESS, I_INSECURITY, I_LONGING,
+    R_AFFECTION, R_TRUST,
     R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
@@ -89,7 +89,7 @@ def compute_defense_profiles(
     # 内部急性推动: 压力和不安加剧去激活（越难受越藏）
     deact += internal[I_STRESS] * 0.05 + internal[I_INSECURITY] * 0.04
 
-    profiles[0] = _sigmoid(deact - 0.48)
+    profiles[0] = _sigmoid((deact - 0.35) * 5.0)
 
     # ═══════════════════════════════════════════════════════════
     # Profile 1 — Hyperactivation (过度激活)
@@ -125,7 +125,7 @@ def compute_defense_profiles(
     # 内部急性推动: 不安全感/渴望 → 依恋系统激活
     hyper += internal[I_INSECURITY] * 0.06 + internal[I_LONGING] * 0.04
 
-    profiles[1] = _sigmoid(hyper - 0.50)
+    profiles[1] = _sigmoid((hyper - 0.38) * 5.0)
 
     return soft_clamp(profiles, 0.0, 1.0)
 

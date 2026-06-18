@@ -1,11 +1,10 @@
-"""状态引擎的矩阵常量与工厂函数。
+"""输入影响矩阵 B —— 心理刺激 → 状态维度的线性映射。
 
-所有耦合矩阵、影响矩阵集中于此，便于后续外置化为 JSON/YAML 配置。
+所有 B 矩阵集中于此，便于后续外置化为 JSON/YAML 配置。
 
-稳定性保证: 所有耦合矩阵经过谱归一化，ρ(A) < 1.0
+跨维度耦合已迁移至 _dynamics.py 中的显式命名规则（替代旧 A 矩阵）。
 """
 
-import logging
 import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
@@ -15,67 +14,6 @@ from state import (
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
 )
-
-logger = logging.getLogger(__name__)
-
-# 目标谱半径 — 所有耦合矩阵缩放到此值以下
-_TARGET_SPECTRAL_RADIUS = 0.95
-
-
-def _spectral_normalize(matrix: np.ndarray, name: str) -> np.ndarray:
-    """谱归一化：确保矩阵谱半径 ≤ 目标值。
-
-    若 ρ(matrix) > target，整体缩放 matrix *= target/ρ。
-    保持矩阵内部相对权重不变，仅缩放整体影响强度。
-
-    返回（可能缩放后的）矩阵。
-    """
-    eigenvalues = np.linalg.eigvals(matrix)
-    rho = max(abs(ev) for ev in eigenvalues)
-
-    if rho >= _TARGET_SPECTRAL_RADIUS:
-        scale = _TARGET_SPECTRAL_RADIUS / rho
-        logger.warning(
-            "%s 谱半径 %.4f ≥ %.2f，应用谱归一化（缩放系数 %.4f）",
-            name, rho, _TARGET_SPECTRAL_RADIUS, scale,
-        )
-        return matrix * scale
-
-    logger.debug("%s 谱半径 %.4f < %.2f，跳过归一化", name, rho, _TARGET_SPECTRAL_RADIUS)
-    return matrix
-
-
-# ═══════════════════════════════════════════════════════════════
-# ② Internal Dynamics 矩阵
-# ═══════════════════════════════════════════════════════════════
-
-
-def _build_state_coupling() -> np.ndarray:
-    """内部状态耦合矩阵 A（I_SIZE × I_SIZE）。
-
-    A[i, j] = h_{t-1}[j] 对 h_t[i] 的影响。
-    正值=正耦合，负值=负耦合，对角线=自保持（惯性）。
-    """
-    A = np.zeros((I_SIZE, I_SIZE), dtype=np.float64)
-
-    # 压力 → 烦躁、疲劳、孤独
-    A[I_IRRITATION, I_STRESS] = 0.15
-    A[I_MENTAL_FATIGUE, I_STRESS] = 0.10
-    A[I_LONELINESS, I_STRESS] = 0.08
-    # 孤独 → 不安全感、渴望
-    A[I_INSECURITY, I_LONELINESS] = 0.12
-    A[I_LONGING, I_LONELINESS] = 0.15
-    # 社交电量耗尽 → 疲劳、烦躁
-    A[I_MENTAL_FATIGUE, I_SOCIAL_BATTERY] = -0.10
-    A[I_IRRITATION, I_SOCIAL_BATTERY] = -0.08
-    # 精力充沛 → 积极状态
-    A[I_STRESS, I_ENERGY] = -0.05
-    A[I_LONELINESS, I_ENERGY] = -0.05
-    # 不安全感 → 压力
-    A[I_STRESS, I_INSECURITY] = 0.10
-
-    np.fill_diagonal(A, 0.85)  # 自保持（惯性）
-    return A
 
 
 def _build_input_influence() -> np.ndarray:
@@ -118,31 +56,12 @@ def _build_input_influence() -> np.ndarray:
     return B
 
 
-STATE_COUPLING_A = _spectral_normalize(_build_state_coupling(), "STATE_COUPLING_A")
 INPUT_INFLUENCE_B = _build_input_influence()
 
 
 # ═══════════════════════════════════════════════════════════════
-# ③ Relationship Dynamics 矩阵
+# Relationship 输入影响矩阵
 # ═══════════════════════════════════════════════════════════════
-
-
-def _build_rel_state_coupling() -> np.ndarray:
-    """关系状态耦合矩阵 A_rel（R_SIZE × R_SIZE）。"""
-    A = np.zeros((R_SIZE, R_SIZE), dtype=np.float64)
-
-    A[R_TRUST, R_AFFECTION] = 0.08
-    A[R_FAMILIARITY, R_AFFECTION] = 0.05
-    A[R_EMOTIONAL_SAFETY, R_TRUST] = 0.10
-    A[R_DEPENDENCY, R_TRUST] = 0.05
-    A[R_EMOTIONAL_SAFETY, R_FAMILIARITY] = 0.08
-    A[R_AFFECTION, R_EMOTIONAL_SAFETY] = 0.05
-    A[R_TRUST, R_EMOTIONAL_SAFETY] = 0.05
-    A[R_AFFECTION, R_ROMANTIC_TENSION] = 0.03
-    A[R_ROMANTIC_TENSION, R_DEPENDENCY] = 0.05
-
-    np.fill_diagonal(A, 0.90)
-    return A
 
 
 def _build_rel_input_influence() -> np.ndarray:
@@ -178,5 +97,4 @@ def _build_rel_input_influence() -> np.ndarray:
     return B
 
 
-REL_STATE_COUPLING_A = _spectral_normalize(_build_rel_state_coupling(), "REL_STATE_COUPLING_A")
 REL_INPUT_INFLUENCE_B = _build_rel_input_influence()
