@@ -10,11 +10,11 @@
 - InternalState:      内部状态（底层心理指标）
 - RelationshipState:  关系状态（对用户的互动感知）
 - StimulusVector:     心理刺激（perception 直接从用户输入提取的心理意义，7维）
-- GateVector:         门控向量（控制刺激进入内部状态的程度）
 - State:              顶层状态聚合（保留 TypedDict）
 
-注意：隐藏状态层（HiddenState）、社交信号层（SocialSignals）、互动影响（InteractionImpact）
-已移除。感知节点现在直接输出 StimulusVector，不再经过线性构造层。
+注意：隐藏状态层（HiddenState）、社交信号层（SocialSignals）、互动影响（InteractionImpact）、
+门控层（GateVector）已移除。感知节点现在直接输出 StimulusVector，
+防御剖面（deactivation/hyperactivation）替代了旧门控的功能。
 """
 
 import numpy as np
@@ -136,7 +136,7 @@ R_LABELS = [
 R_LABEL_IDX = {k: i for i, k in enumerate(R_LABELS)}
 
 
-# ── HiddenState 已移除，相关"里表情"职责合并至 Surface 与 Gate 层 ──
+# ── HiddenState 已移除，相关"里表情"职责合并至 defense 层（inner/outer 刺激分离） ──
 
 # ═══════════════════════════════════════════════════════════════
 # StimulusVector — 心理刺激（7 维）
@@ -162,33 +162,14 @@ ST_LABELS = [
 ST_LABEL_IDX = {k: i for i, k in enumerate(ST_LABELS)}
 
 # ═══════════════════════════════════════════════════════════════
-# GateVector — 门控向量（4 维）
-# 控制心理刺激在多大程度上能进入内部状态。
-# 每一维 [0,1]，0=完全关闭（刺激被阻挡），1=完全开放。（GateVector 保持 [0,1]，非心理状态向量）
-# ═══════════════════════════════════════════════════════════════
-
-G_SUPPRESSION = 0   # 压抑门：1=压抑一切情绪进入（防御姿态）
-G_VULNERABILITY = 1 # 脆弱门：1=允许示弱/暴露脆弱
-G_ATTACHMENT = 2    # 依恋门：1=对依恋刺激敏感
-G_LEAKAGE = 3       # 泄漏门：1=压抑情绪泄漏到表面
-G_SIZE = 4
-
-G_LABELS = [
-    "suppression_gate", "vulnerability_gate",
-    "attachment_gate", "leakage_gate",
-]
-G_LABEL_IDX = {k: i for i, k in enumerate(G_LABELS)}
-
-# ═══════════════════════════════════════════════════════════════
 # 类型别名（保持导入兼容性）
 # ═══════════════════════════════════════════════════════════════
 
 InternalState = np.ndarray          # 8 维，用 I_* 索引
 RelationshipState = np.ndarray      # 6 维，用 R_* 索引
-SurfaceState = np.ndarray           # 7 维，用 S_* 索引（动态投影，不存储）
+SurfaceState = np.ndarray           # 7 维，用 S_* 索引
 Traits = np.ndarray                 # 10 维，用 T_* 索引
 StimulusVector = np.ndarray         # 7 维，用 ST_* 索引（perception 直接输出）
-GateVector = np.ndarray             # 4 维，用 G_* 索引
 
 # ═══════════════════════════════════════════════════════════════
 # 工具函数：键值对字典 → numpy 数组

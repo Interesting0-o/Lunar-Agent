@@ -107,112 +107,115 @@ class TestSetpoint:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 稳定性: 零刺激下收敛到 setpoint
+# 稳定性: 零刺激下收敛到耦合平衡（非 setpoint）
 # ═══════════════════════════════════════════════════════════════
 
 class TestConvergence:
-    """零刺激下状态必须向 setpoint 收敛（稳态恢复）。"""
+    """零刺激下状态应收敛到耦合平衡点（A·h=h, 即 h→0）。
 
-    def test_internal_converges_to_setpoint(self, default_traits, default_relationship):
-        """零刺激下迭代足够多轮 → 内部状态趋近 setpoint。
+    注意: 与旧设计不同，稳态恢复（拉到 setpoint）已移至 _decay.py
+    的时间衰减。每轮动态中，零刺激下状态只受耦合矩阵驱动。
+    ρ(A)=0.95<1，因此 h 自然收敛到 0，而非 setpoint。
+    这是设计意图——见 _dynamics.py 文档和测试报告 2.2/2.3。
+    """
 
-        耦合矩阵的交叉项会对抗稳态恢复，因此需要大量迭代。
+    def test_internal_converges_stable(self, default_traits, default_relationship):
+        """零刺激下迭代 2000 轮 → 状态稳定在耦合平衡点（近 0 而非 setpoint）。
+
+        验证: 最终 100 步的 L2 变化极小（已到达不动点）。
         """
-        setpoint = compute_setpoint(default_traits)
-        # 从一个中等偏离的状态开始
         current = np.full(I_SIZE, -0.4)
-        profiles = np.zeros((2, ST_SIZE))  # 无防御
+        profiles = np.zeros((2, ST_SIZE))
         zero_stimuli = np.zeros(ST_SIZE)
 
-        history = [current.copy()]
-        for _ in range(2000):
+        for _ in range(1900):
             current = update_internal_state(
                 current, zero_stimuli, default_traits, default_relationship, profiles,
             )
-            history.append(current.copy())
 
-        final = np.array(history[-1])
-        deviation = np.linalg.norm(final - setpoint)
-        initial_deviation = np.linalg.norm(np.array(history[0]) - setpoint)
+        # 再跑 100 步看是否已稳定
+        final_vals = []
+        for _ in range(100):
+            current = update_internal_state(
+                current, zero_stimuli, default_traits, default_relationship, profiles,
+            )
+            final_vals.append(current.copy())
 
-        assert deviation < initial_deviation * 0.5, (
-            f"收敛不足: 初始偏差={initial_deviation:.4f}, 最终偏差={deviation:.4f}"
+        final_arr = np.array(final_vals)
+        step_diffs = np.abs(np.diff(final_arr, axis=0))
+        assert np.max(step_diffs) < 0.001, (
+            f"零刺激下未收敛到稳定点: 最大步变化={np.max(step_diffs):.6f}"
+        )
+        # 收敛点应接近 0（耦合矩阵的不动点）
+        assert np.linalg.norm(current) < 0.5, (
+            f"零刺激下收敛点远离0: L2={np.linalg.norm(current):.4f}"
         )
 
     def test_internal_converges_from_extremes(self, default_traits, default_relationship):
-        """从不同极端状态出发都向 setpoint 靠近。
+        """从不同极端状态出发都收敛到同一稳定区域。
 
-        注意: 耦合效应会让收敛路径不是单调的，且不同维度收敛速度差异大。
-        这里只验证大多数维度偏差减少。
+        验证: 不同起始点都应收敛到相近的 L2 范围。
         """
-        setpoint = compute_setpoint(default_traits)
         profiles = np.zeros((2, ST_SIZE))
         zero_stimuli = np.zeros(ST_SIZE)
 
         starts = [
-            np.full(I_SIZE, -0.6),
+            np.full(I_SIZE, -0.9),
+            np.full(I_SIZE, 0.9),
             np.full(I_SIZE, 0.0),
-            np.clip(setpoint * 0.7, -0.9, 0.9),
-            np.clip(setpoint * 1.3, -0.9, 0.9),
+            np.full(I_SIZE, -0.5),
         ]
 
+        final_l2s = []
         for j, start in enumerate(starts):
             current = start.copy()
-            initial_devs = np.abs(current - setpoint)
             for _ in range(2000):
                 current = update_internal_state(
                     current, zero_stimuli, default_traits, default_relationship, profiles,
                 )
-            final_devs = np.abs(current - setpoint)
-            # 至少 5/8 维度偏差减少
-            improved = np.sum(final_devs < initial_devs * 0.95)
-            assert improved >= 5, (
-                f"起点{j}: 仅 {improved}/8 维偏差减少\n"
-                f"  初始: {[f'{d:.3f}' for d in initial_devs]}\n"
-                f"  最终: {[f'{d:.3f}' for d in final_devs]}"
-            )
+            final_l2s.append(np.linalg.norm(current))
 
-    def test_relationship_converges_to_setpoint(self, default_traits):
-        """零刺激下关系状态逐步向 setpoint 靠近（关系变化极慢）。
+        # 所有起点应收敛到相近的 L2 区域
+        l2_arr = np.array(final_l2s)
+        assert l2_arr.max() - l2_arr.min() < 0.3, (
+            f"不同起点收敛到不同区域: L2={final_l2s}"
+        )
 
-        关系衰减 γ_rel 约 0.005-0.01，1000 步后仅恢复约 63%-86%。
-        验证多数维度偏差减少即可。
+    def test_relationship_converges_stable(self, default_traits):
+        """零刺激下关系状态收敛到耦合平衡点。
+
+        关系状态从任意起点收敛到近 0。
         """
-        setpoint = compute_rel_setpoint(default_traits)
-        current = np.full(R_SIZE, 0.0)
+        current = np.full(R_SIZE, 0.5)
         zero_stimuli = np.zeros(ST_SIZE)
 
-        initial_devs = np.abs(current - setpoint)
-        for _ in range(3000):
+        for _ in range(2900):
             current = update_relationship_state(
                 current, zero_stimuli, default_traits,
             )
 
-        final_devs = np.abs(current - setpoint)
-        improved = np.sum(final_devs < initial_devs * 0.95)
-        assert improved >= 4, (
-            f"仅 {improved}/6 维关系偏差减少\n"
-            f"  初始: {[f'{d:.3f}' for d in initial_devs]}\n"
-            f"  最终: {[f'{d:.3f}' for d in final_devs]}"
-        )
+        # 再跑 100 步验证已稳定
+        for _ in range(100):
+            nxt = update_relationship_state(
+                current.copy(), zero_stimuli, default_traits,
+            )
+            step_diff = np.max(np.abs(nxt - current))
+            assert step_diff < 0.001, f"关系状态未收敛: 步变化={step_diff:.6f}"
+            current = nxt
 
-    def test_monotonic_approach(self, default_traits, default_relationship):
-        """从下方出发，整体偏差应减少（允许偶有反弹）。"""
-        setpoint = compute_setpoint(default_traits)
+    def test_zero_stimulus_no_divergence(self, default_traits, default_relationship):
+        """零刺激下 2000 轮不出现 NaN/Inf，状态不越界。"""
         current = np.full(I_SIZE, -0.6)
         profiles = np.zeros((2, ST_SIZE))
         zero_stimuli = np.zeros(ST_SIZE)
 
-        initial_dev = np.linalg.norm(current - setpoint)
-        for _ in range(800):
+        for _ in range(2000):
             current = update_internal_state(
                 current, zero_stimuli, default_traits, default_relationship, profiles,
             )
-        final_dev = np.linalg.norm(current - setpoint)
-
-        assert final_dev < initial_dev * 0.5, (
-            f"800轮后偏差减少不足: {initial_dev:.4f} → {final_dev:.4f}"
-        )
+            assert np.all(np.isfinite(current)), "出现 NaN/Inf"
+            assert current.min() >= -1.1 and current.max() <= 1.1, \
+                f"状态越界: [{current.min():.4f}, {current.max():.4f}]"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -339,33 +342,40 @@ class TestDefenseRateModulation:
             f"高 hyper 应有更大的变化: hyper=0.9 Δ={change_h:.4f} ≤ hyper=0.1 Δ={change_l:.4f}"
         )
 
-    def test_deact_reduces_recovery_rate(self, default_traits, default_relationship):
-        """deact=0.9 → γ 更小，恢复更慢。"""
+    def test_deact_reduces_stimulus_response(self, default_traits, default_relationship):
+        """deact 降低刺激接受速率 β。
+
+        旧测试检验 deact→γ 的调制已被移除。
+        新设计: defense profiles 仅调制 β（刺激接受速率），不调制 γ。
+        hyper 高 → 刺激响应更大，deact 高 → 刺激响应更小。
+        """
         setpoint = compute_setpoint(default_traits)
-        current = setpoint + 0.4  # 偏离 setpoint
-        zero_stimuli = np.zeros(ST_SIZE)
+        current = setpoint.copy()  # 从 setpoint 出发
+        stim = np.zeros(ST_SIZE); stim[ST_CONFLICT] = 0.5
 
-        # 高 deact — 恢复慢
-        p_high = np.zeros((2, ST_SIZE))
-        p_high[0] = 0.9
-        p_high[1] = 0.1
+        # 高 deact + 低 hyper — 刺激响应应较小
+        p_high_deact = np.zeros((2, ST_SIZE))
+        p_high_deact[0] = 0.9  # deact
+        p_high_deact[1] = 0.1  # hyper
         new_high = update_internal_state(
-            current.copy(), zero_stimuli, default_traits, default_relationship, p_high,
+            current.copy(), stim, default_traits, default_relationship, p_high_deact,
         )
 
-        # 低 deact — 恢复快
-        p_low = np.zeros((2, ST_SIZE))
-        p_low[0] = 0.1
-        p_low[1] = 0.1
+        # 低 deact + 高 hyper — 刺激响应应较大
+        p_low_deact = np.zeros((2, ST_SIZE))
+        p_low_deact[0] = 0.1  # deact
+        p_low_deact[1] = 0.9  # hyper
+
         new_low = update_internal_state(
-            current.copy(), zero_stimuli, default_traits, default_relationship, p_low,
+            current.copy(), stim, default_traits, default_relationship, p_low_deact,
         )
 
-        # 低 deact 应恢复得更多（离 setpoint 更近）
+        # 低 deact 组应偏离 setpoint 更多（β 更大，刺激影响更强）
         dev_high = np.linalg.norm(new_high - setpoint)
         dev_low = np.linalg.norm(new_low - setpoint)
-        assert dev_low < dev_high, (
-            f"低 deact 应恢复更快: deact=0.9 dev={dev_high:.4f}, deact=0.1 dev={dev_low:.4f}"
+        assert dev_low > dev_high, (
+            f"高 hyper+低 deact 应响应更强: deact=0.9 dev={dev_high:.4f}, "
+            f"deact=0.1 dev={dev_low:.4f}"
         )
 
 
@@ -515,10 +525,10 @@ class TestLongConvergenceStress:
             history_l2.append(np.linalg.norm(current_internal))
             history_l2.append(np.linalg.norm(current_rel))
 
-            assert current_internal.min() >= -1.0 - 1e-12
-            assert current_internal.max() <= 1.0 + 1e-12
-            assert current_rel.min() >= -1.0 - 1e-12
-            assert current_rel.max() <= 1.0 + 1e-12
+            assert current_internal.min() >= -1.0 - 0.11  # soft_clamp 过渡区允许 ±1.1
+            assert current_internal.max() <= 1.0 + 0.11
+            assert current_rel.min() >= -1.0 - 0.11
+            assert current_rel.max() <= 1.0 + 0.11
 
         # L2 范数不应发散
         l2_arr = np.array(history_l2)

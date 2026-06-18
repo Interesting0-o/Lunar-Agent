@@ -1,4 +1,4 @@
-"""Layer 1: 工具函数测试 — soft_clamp, _sigmoid, _sigmoid_gate。
+"""Layer 1: 工具函数测试 — soft_clamp, _sigmoid。
 
 大量数据测试: 覆盖极端值、边界、数值稳定性。
 """
@@ -6,7 +6,7 @@
 import numpy as np
 import pytest
 from numpy.testing import assert_array_almost_equal, assert_array_less
-from state_engine._utils import soft_clamp, _sigmoid, _sigmoid_gate
+from state_engine._utils import soft_clamp, _sigmoid
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -188,33 +188,6 @@ class TestSigmoid:
             dist.sort()
             result = _sigmoid(dist)
             assert np.all(np.diff(result) > 0), f"{dist_name} 不单调"
-
-
-# ═══════════════════════════════════════════════════════════════
-# _sigmoid_gate
-# ═══════════════════════════════════════════════════════════════
-
-class TestSigmoidGate:
-    """门控专用的 sigmoid 激活。"""
-
-    def test_range(self, rng):
-        """输出 ∈ (0, 1)。"""
-        x = rng.uniform(-10, 10, size=5000)
-        result = _sigmoid_gate(x)
-        assert np.all(result > 0.0)
-        assert np.all(result < 1.0)
-
-    def test_midpoint(self):
-        """raw=0 时输出 ≈ 0.5（sigoid 中点）。"""
-        result = _sigmoid_gate(np.array([0.0]))
-        assert result[0] == pytest.approx(0.5, abs=1e-12)
-
-    def test_monotonic(self, rng):
-        """单调递增。"""
-        x = rng.uniform(-5, 5, size=3000)
-        x.sort()
-        result = _sigmoid_gate(x)
-        assert np.all(np.diff(result) >= -1e-15)
 
 
 # ═══════════════════════════════════════════════════════════════

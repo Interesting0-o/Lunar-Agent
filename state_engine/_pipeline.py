@@ -1,8 +1,11 @@
 """State Engine Pipeline —— 3 步管线编排。
 
 ① 防御剖面 (deactivation / hyperactivation) → inner/outer 刺激
-② 残差动力学 → 内部 + 关系状态更新（含稳态恢复）
+② 残差动力学 → 内部 + 关系状态更新（刺激+耦合驱动，无 per-turn 稳态恢复）
 ③ 表面投影 → 可观测表达
+
+稳态恢复（拉到人格基线）由时间衰减（_decay.py）在对话间隔中处理，
+不参与每轮动态。
 
 防御剖面基于 Bowlby (1980) 依恋防御二分法:
   - Deactivation (去激活):  高回避 → 削减外在表达
@@ -12,7 +15,7 @@
 
 from typing import Optional
 import numpy as np
-from state import ST_SIZE, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP
+from state import ST_SIZE
 from ._defenses import compute_defense_profiles, apply_defenses
 from ._dynamics import (
     update_internal_state,
@@ -67,7 +70,7 @@ def update_all(
     profiles = compute_defense_profiles(traits, current_relationship, current_internal)
     inner_stimuli, outer_stimuli = apply_defenses(stimuli, profiles)
 
-    # ② 残差动力学（含内建稳态恢复，不再需要独立的 decay 步骤）
+    # ② 残差动力学（刺激+耦合驱动，稳态恢复已移至 _decay.py）
     new_internal = update_internal_state(
         current_internal, inner_stimuli, traits, current_relationship, profiles,
     )

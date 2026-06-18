@@ -42,12 +42,3 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     neg_x = x[~pos_mask]
     result[~pos_mask] = np.exp(neg_x) / (1.0 + np.exp(neg_x))
     return result
-
-
-def _sigmoid_gate(raw: np.ndarray) -> np.ndarray:
-    """门控专用 sigmoid 激活：值域 (0, 1），raw=0 时输出 0.5。
-
-    与 np.clip 的差异：硬阈值 → 软阈值，符合心理学"防御机制软启动"。
-    raw 已是 [-1, 1] 中性状态值，无需人工居中。
-    """
-    return _sigmoid(raw)

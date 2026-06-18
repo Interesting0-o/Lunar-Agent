@@ -1,9 +1,9 @@
-"""④ Surface Projection —— 内部状态 + 外表情刺激 → 表面表达。
+"""Surface Projection —— 内部状态 + 外表情刺激 → 表面表达。
 
-SurfaceState 不存储，每轮从内部状态 + outer_stimuli 动态投影。
+SurfaceState 每轮从内部状态 + outer_stimuli 动态投影。
 表面表达 = 内部状态基线 + 外表情刺激影响 + 特质修饰
 
-关键：外表情刺激是被压抑后的版本（由 apply_gates 输出）
+关键：外表情刺激是被压抑后的版本（由 apply_defenses 的 deactivation 输出）
   - validation 被压抑 → 表面"温度"自然降低
   - conflict 被压抑 → 表面"尖锐度"自然降低
 """
@@ -12,7 +12,7 @@ import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_MENTAL_FATIGUE,
-    R_AFFECTION, R_FAMILIARITY, R_EMOTIONAL_SAFETY,
+    R_AFFECTION, R_EMOTIONAL_SAFETY,
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
     T_PRIDE, T_EMOTIONAL_OPENNESS, T_OPTIMISM,

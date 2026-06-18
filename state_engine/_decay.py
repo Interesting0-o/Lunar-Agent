@@ -1,6 +1,9 @@
-"""Time-Aware Decay —— 时间感知状态衰减。
+"""Time-Aware Decay —— 时间感知状态衰减（稳态恢复的唯一通道）。
 
 基于情感动力学的时间衰减组件，以真实时间戳驱动状态向基线回归。
+与残差动力学（_dynamics.py）的分工:
+  - _dynamics:  每轮对话内的刺激+耦合驱动（不向 setpoint 拉）
+  - _decay:     对话间隔中的时间衰减（向 setpoint 拉）
 
 学术基础:
   - 指数衰减: Rutledge et al. (2014), Vanhasbroeck et al. (2024)
@@ -12,10 +15,6 @@
   decayed[s] = baseline[s] + (current[s] - baseline[s]) × exp(-λ_eff[s] × Δt)
 
 其中 λ_eff 由维度基础衰减率、人格调制、时间曲线三者共同决定。
-
-与残差动力学的分工:
-  - apply_time_decay: 处理"无交互期间"的自然恢复/退化（由 Δt 驱动）
-  - update_all:        处理"有交互期间"的刺激响应（由 stimuli 驱动）
 """
 
 from dataclasses import dataclass, field
@@ -33,6 +32,7 @@ from state import (
     T_ANGER_REACTIVITY, T_EMOTIONAL_OPENNESS,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
 )
+from ._dynamics import compute_setpoint, compute_rel_setpoint
 from ._utils import soft_clamp
 
 
@@ -97,7 +97,7 @@ def _compute_internal_personality_mod(traits: np.ndarray) -> float:
           Lücke et al. (2024) — 高神经质 → 更慢的压力恢复
     """
     mod = 1.0
-    mod += traits[T_EMOTIONAL_STABILITY]  * 0.15   # 稳定→恢复快
+    mod += traits[T_EMOTIONAL_STABILITY] * 0.15   # 稳定→恢复快
     mod += traits[T_OPTIMISM]            * 0.075  # 乐观→恢复快
     mod -= traits[T_ANXIETY_PRONENESS]   * 0.125  # 焦虑→恢复慢
     mod -= traits[T_ANGER_REACTIVITY]    * 0.05   # 易怒→恢复慢
@@ -113,9 +113,9 @@ def _compute_relationship_personality_mod(traits: np.ndarray) -> float:
           Pellegrini (1977) — 依恋焦虑→放不下
     """
     mod = 1.0
-    mod += traits[T_ATTACHMENT_AVOIDANCE]  * 0.175  # 回避→疏远快
-    mod -= traits[T_ATTACHMENT_ANXIETY]    * 0.10   # 焦虑→放不下
-    mod -= traits[T_EMOTIONAL_STABILITY]   * 0.05   # 稳定→关系稳定
+    mod += traits[T_ATTACHMENT_AVOIDANCE] * 0.175  # 回避→疏远快
+    mod -= traits[T_ATTACHMENT_ANXIETY]   * 0.10   # 焦虑→放不下
+    mod -= traits[T_EMOTIONAL_STABILITY]  * 0.05   # 稳定→关系稳定
 
     return soft_clamp(mod, 0.3, 2.0)
 
@@ -229,6 +229,9 @@ def apply_time_decay(
 ) -> dict:
     """对内部和关系状态同时应用时间衰减（便捷接口）。
 
+    从 _dynamics 导入 compute_setpoint / compute_rel_setpoint，
+    消除 setpoint 重复代码（之前版本有重复实现）。
+
     Args:
         current_internal: 当前内部状态 (8,)
         current_relationship: 当前关系状态 (6,)
@@ -239,8 +242,8 @@ def apply_time_decay(
     Returns:
         {"internal_state": (8,), "relationship_state": (6,)}
     """
-    internal_sp = _compute_setpoint_for_decay(traits)
-    rel_sp = _compute_rel_setpoint_for_decay(traits)
+    internal_sp = compute_setpoint(traits)
+    rel_sp = compute_rel_setpoint(traits)
 
     return {
         "internal_state": apply_time_decay_internal(
@@ -250,38 +253,3 @@ def apply_time_decay(
             current_relationship, rel_sp, traits, delta_hours, config,
         ),
     }
-
-
-# ── setpoint 计算 (与 _dynamics.py 保持同步) ──
-
-def _compute_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
-    """内部状态稳态基线 — 复制自 dynamics.compute_setpoint。"""
-    from state import DEFAULT_INTERNAL
-    sp = DEFAULT_INTERNAL.copy()
-
-    sp[I_ENERGY]     += traits[T_OPTIMISM] * 0.15 - traits[T_ANXIETY_PRONENESS] * 0.08
-    sp[I_STRESS]     += traits[T_ANXIETY_PRONENESS] * 0.20 + traits[T_ANGER_REACTIVITY] * 0.05
-    sp[I_LONELINESS] += traits[T_ATTACHMENT_ANXIETY] * 0.10 - traits[T_OPTIMISM] * 0.05
-    sp[I_INSECURITY] += traits[T_ATTACHMENT_ANXIETY] * 0.20 + traits[T_ANXIETY_PRONENESS] * 0.10
-    sp[I_IRRITATION] += traits[T_ANGER_REACTIVITY] * 0.15 - traits[T_EMOTIONAL_STABILITY] * 0.10
-    sp[I_LONGING]    += traits[T_ATTACHMENT_ANXIETY] * 0.15
-    sp[I_SOCIAL_BATTERY] += traits[T_EMOTIONAL_STABILITY] * 0.05
-    sp[I_MENTAL_FATIGUE] -= traits[T_EMOTIONAL_STABILITY] * 0.08 + traits[T_ANXIETY_PRONENESS] * 0.05
-
-    return np.clip(sp, -0.9, 0.9)
-
-
-def _compute_rel_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
-    """关系状态稳态基线 — 复制自 dynamics.compute_rel_setpoint。"""
-    from state import DEFAULT_RELATIONSHIP
-    sp = DEFAULT_RELATIONSHIP.copy()
-
-    sp[R_TRUST]             -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_AFFECTION]         -= traits[T_ATTACHMENT_AVOIDANCE] * 0.10
-    sp[R_DEPENDENCY]        -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_DEPENDENCY]        += traits[T_ATTACHMENT_ANXIETY] * 0.10
-    sp[R_EMOTIONAL_SAFETY]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12
-    sp[R_FAMILIARITY]       -= traits[T_ATTACHMENT_AVOIDANCE] * 0.05
-    sp[R_ROMANTIC_TENSION]  += traits[T_ATTACHMENT_ANXIETY] * 0.05
-
-    return np.clip(sp, -0.96, 0.96)

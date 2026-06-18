@@ -3,8 +3,8 @@
 
 此模块仅包含系统级配置，不涉及任何 prompt 文本。
 prompt 请直接导入对应子模块：
-  character_prompt.py  — SYSTEM_PROMPT （角色人设）
-  perception_prompt.py — PERCEPTION_SYSTEM_PROMPT （感知层提示词）
+  character.py          — SYSTEM_PROMPT （角色人设）
+  perception.py         — PERCEPTION_SYSTEM_PROMPT （感知层提示词）
 """
 
 PERCEPTION_CONFIG = {
