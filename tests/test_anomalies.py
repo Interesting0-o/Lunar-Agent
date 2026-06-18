@@ -133,7 +133,7 @@ class TestAnomalySingleRoundResponsiveness:
 
 
 class TestAnomalyRateParameters:
-    """探测：α/β/γ 速率参数的分布和边界。"""
+    """探测：α/β 速率参数的分布和边界（γ 已弃用，转移到 _decay.py）。"""
 
     def test_beta_vs_alpha_balance(self, rng):
         """α 和 β 的相对大小决定刺激 vs 耦合的权重。
@@ -274,69 +274,6 @@ class TestAnomalySaturation:
             dev = abs(current_rel[dim] - sp_rel[dim])
             marker = " ⚠️" if dev > 0.05 else ""
             print(f"  {R_LABELS[dim]:>18s} | {current_rel[dim]:8.4f} | {sp_rel[dim]:8.4f} | {dev:8.4f}{marker}")
-
-
-class TestAnomalyCouplingMatrix:
-    """探测：耦合矩阵是否产生了意外的方向性。"""
-
-    def test_coupling_eigenvalue_structure(self):
-        """特征值分解：是否有接近 1 的特征值（缓慢衰减模式）？"""
-        from state_engine._matrices import STATE_COUPLING_A, REL_STATE_COUPLING_A
-
-        for name, A in [("STATE_COUPLING_A", STATE_COUPLING_A),
-                         ("REL_STATE_COUPLING_A", REL_STATE_COUPLING_A)]:
-            eigvals = np.linalg.eigvals(A)
-            real_parts = np.real(eigvals)
-            imag_parts = np.imag(eigvals)
-
-            print(f"\n  === {name} 特征值分析 ===")
-            print(f"  实部范围: [{real_parts.min():.4f}, {real_parts.max():.4f}]")
-            print(f"  虚部范围: [{imag_parts.min():.4f}, {imag_parts.max():.4f}]")
-
-            # 是否有复特征值（震荡模式）?
-            complex_ev = np.abs(imag_parts) > 1e-10
-            if complex_ev.any():
-                print(f"  ⚠️ 有 {complex_ev.sum()} 个复特征值（震荡模式）")
-                for j in np.where(complex_ev)[0]:
-                    print(f"    λ[{j}] = {real_parts[j]:.4f} ± {imag_parts[j]:.4f}i")
-
-            # 主导特征值
-            dominant = real_parts.max()
-            print(f"  主导特征值: {dominant:.4f}")
-            if dominant > 0.90:
-                print(f"  ⚠️ 主导特征值接近 1.0，系统有极慢衰减模式")
-
-            # 负特征值（瞬时反转）
-            neg_ev = real_parts < -0.01
-            if neg_ev.any():
-                print(f"  ⚠️ 有 {neg_ev.sum()} 个负特征值（符号交替模式）")
-
-    def test_coupling_cross_effects(self, default_traits, default_internal):
-        """量化耦合矩阵的交叉项对各维度的净影响方向。
-
-        耦合项 = A@h - h。正值 = 往上推，负值 = 往下拉。
-        检查是否有维度被交叉项拉向反直觉的方向。
-        """
-        from state_engine._matrices import STATE_COUPLING_A
-
-        h = default_internal
-        A = STATE_COUPLING_A
-        coupling = A @ h - h
-
-        print(f"\n  === 默认内部状态下耦合交叉效应 ===")
-        print(f"  {'维度':>18s} | {'当前值':>8s} | {'耦合效应':>10s} | {'方向'}")
-        print(f"  {'-'*18} | {'-'*8} | {'-'*10} | {'-'*6}")
-        for dim in range(I_SIZE):
-            eff = coupling[dim]
-            direction = "↑推高" if eff > 0.001 else ("↓拉低" if eff < -0.001 else "→中性")
-            marker = ""
-            # 检查反直觉的推拉
-            # e.g. loneliness 被 coupling 拉低（当前 loneliness=0.3, 但耦合产生了负效应）
-            if dim == I_LONELINESS and eff < -0.01:
-                marker = " ⚠️ 耦合将孤独感拉低"
-            if dim == I_ENERGY and eff < -0.01:
-                marker = " ⚠️ 耦合将精力拉低"
-            print(f"  {I_LABELS[dim]:>18s} | {h[dim]:8.4f} | {eff:+10.4f} | {direction}{marker}")
 
 
 class TestAnomalyDefenseCollapse:
@@ -495,3 +432,115 @@ class TestAnomalySurfaceDegeneracy:
                 print(f"                     ⚠️ 触底率 > 10% — 该维度容易退化到 -1")
             if ceil_counts[dim] / n > 0.1:
                 print(f"                     ⚠️ 触顶率 > 10% — 该维度容易退化到 1")
+
+
+class TestAnomalyBetaModulation:
+    """探测：β 是否随防御剖面有意义地变化。"""
+
+    def test_beta_range_after_fix(self, rng):
+        """β 在不同防御配置下应有可观测的变动范围。
+
+        修复后（2026-06-18）：sigmoid 缩放 + β 公式重写，
+        预期 β 有效范围 > 0.10（旧设计仅 0.042）。
+        """
+        from state_engine._dynamics import update_internal_state
+        n = 50_000
+        traits_batch = rng.uniform(-1, 1, size=(n, 10))
+        rel_batch = rng.uniform(-1, 1, size=(n, 6))
+        internal_batch = rng.uniform(-1, 1, size=(n, 8))
+        zero_stim = np.zeros(7)
+
+        betas = np.empty(n)
+        for i in range(n):
+            profiles = compute_defense_profiles(
+                traits_batch[i], rel_batch[i], internal_batch[i],
+            )
+            deact, hyper = profiles[0].mean(), profiles[1].mean()
+            beta = max(0.01, min(0.35, 0.05 + hyper * 0.35 - deact * 0.15))
+            betas[i] = beta
+
+        low_group = betas < betas.mean() - betas.std()
+        high_group = betas > betas.mean() + betas.std()
+        effective_range = betas.max() - betas.min()
+        coef_var = betas.std() / betas.mean()
+
+        print(f"\n  === β 调制范围检验 (n={n:,}) ===")
+        print(f"  β 范围: [{betas.min():.4f}, {betas.max():.4f}]")
+        print(f"  β 均值: {betas.mean():.4f} ± {betas.std():.4f}")
+        print(f"  β 有效变动: {effective_range:.4f}")
+        print(f"  β 变异系数: {coef_var:.3f}")
+        print(f"  低 β 组占比: {low_group.mean()*100:.1f}%  "
+              f"(mean={betas[low_group].mean():.4f})")
+        print(f"  高 β 组占比: {high_group.mean()*100:.1f}%  "
+              f"(mean={betas[high_group].mean():.4f})")
+
+        if effective_range < 0.05:
+            print(f"  🔴 β 有效变动 {effective_range:.4f} < 0.05 — 调制基本失效")
+        elif effective_range < 0.15:
+            print(f"  🟡 β 有效变动 {effective_range:.4f} — 有一定范围但偏窄")
+        else:
+            print(f"  ✅ β 有效变动 {effective_range:.4f} — 调制效果良好")
+
+
+class TestAnomalyMatrixNoise:
+    """探测：映射矩阵噪声是否引入系统性偏差。"""
+
+    def test_matrix_noise_no_systematic_drift(self, rng):
+        """矩阵噪声每轮 ε ~ N(0, 0.03²) 叠加到 W 上，
+        长期运行时不应导致状态均值系统性偏离无噪声基线。
+        """
+        from tests.test_adversarial_engine import (
+            CoupledAgents, SurfaceToStimuliMapping, detect_anomalies,
+        )
+        from state import DEFAULT_TRAITS
+
+        n_steps = 1000
+
+        # 无噪声基线
+        clean = CoupledAgents(
+            traits_a=DEFAULT_TRAITS.copy(),
+            traits_b=DEFAULT_TRAITS.copy(),
+            mapping_a2b=SurfaceToStimuliMapping(),
+            mapping_b2a=SurfaceToStimuliMapping(),
+        )
+        clean.run(n_steps)
+        baseline_a = clean.history.get_agent_trajectory("A", "internal").mean(axis=0)
+
+        # 有噪声
+        noisy = CoupledAgents(
+            traits_a=DEFAULT_TRAITS.copy(),
+            traits_b=DEFAULT_TRAITS.copy(),
+            mapping_a2b=SurfaceToStimuliMapping(matrix_noise_std=0.03),
+            mapping_b2a=SurfaceToStimuliMapping(matrix_noise_std=0.03),
+            rng=rng,
+        )
+        noisy.run(n_steps)
+        noisy_mean_a = noisy.history.get_agent_trajectory("A", "internal").mean(axis=0)
+
+        drift = np.abs(noisy_mean_a - baseline_a)
+        max_drift = drift.max()
+        avg_drift = drift.mean()
+
+        print(f"\n  === 矩阵噪声系统性漂移检验 (n={n_steps} 轮) ===")
+        print(f"  {'维度':>18s} | {'无噪声均值':>10s} | {'有噪声均值':>10s} | {'漂移':>8s}")
+        print(f"  {'-'*18} | {'-'*10} | {'-'*10} | {'-'*8}")
+        for dim in range(len(baseline_a)):
+            print(f"  {I_LABELS[dim]:>18s} | {baseline_a[dim]:10.4f} | "
+                  f"{noisy_mean_a[dim]:10.4f} | {drift[dim]:8.4f}")
+        print(f"  {'-'*50}")
+        print(f"  最大维度漂移: {max_drift:.4f}")
+        print(f"  平均维度漂移: {avg_drift:.4f}")
+
+        # 噪声应不导致系统性偏差（如果噪声是零均值且对称的）
+        if max_drift > 0.05:
+            print(f"  ⚠️ 最大漂移 {max_drift:.4f} > 0.05 — 可能存在系统性偏差")
+        else:
+            print(f"  ✅ 漂移在可接受范围内")
+
+        # 检查是否有边界违规
+        reports = detect_anomalies(noisy.history, DEFAULT_TRAITS, DEFAULT_TRAITS)
+        boundary = [r for r in reports if r.anomaly_type == "boundary"]
+        if boundary:
+            print(f"  ⚠️ 噪声运行中出现 {len(boundary)} 个边界违规")
+        else:
+            print(f"  ✅ 无边界违规")
