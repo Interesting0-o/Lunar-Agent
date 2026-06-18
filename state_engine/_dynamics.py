@@ -44,18 +44,17 @@ def compute_setpoint(traits: np.ndarray) -> np.ndarray:
     setpoint 是系统在无外部刺激时的长期收敛目标。
     """
     sp = DEFAULT_INTERNAL.copy()
-    t_dev = traits - 0.5
 
-    sp[I_ENERGY]     += t_dev[T_OPTIMISM] * 0.15 - t_dev[T_ANXIETY_PRONENESS] * 0.08
-    sp[I_STRESS]     += t_dev[T_ANXIETY_PRONENESS] * 0.20 + t_dev[T_ANGER_REACTIVITY] * 0.05
-    sp[I_LONELINESS] += t_dev[T_ATTACHMENT_ANXIETY] * 0.10 - t_dev[T_OPTIMISM] * 0.05
-    sp[I_INSECURITY] += t_dev[T_ATTACHMENT_ANXIETY] * 0.20 + t_dev[T_ANXIETY_PRONENESS] * 0.10
-    sp[I_IRRITATION] += t_dev[T_ANGER_REACTIVITY] * 0.15 - t_dev[T_EMOTIONAL_STABILITY] * 0.10
-    sp[I_LONGING]    += t_dev[T_ATTACHMENT_ANXIETY] * 0.15
-    sp[I_SOCIAL_BATTERY] += t_dev[T_EMOTIONAL_STABILITY] * 0.05
-    sp[I_MENTAL_FATIGUE] -= t_dev[T_EMOTIONAL_STABILITY] * 0.08 + t_dev[T_ANXIETY_PRONENESS] * 0.05
+    sp[I_ENERGY]     += traits[T_OPTIMISM] * 0.15 - traits[T_ANXIETY_PRONENESS] * 0.08
+    sp[I_STRESS]     += traits[T_ANXIETY_PRONENESS] * 0.20 + traits[T_ANGER_REACTIVITY] * 0.05
+    sp[I_LONELINESS] += traits[T_ATTACHMENT_ANXIETY] * 0.10 - traits[T_OPTIMISM] * 0.05
+    sp[I_INSECURITY] += traits[T_ATTACHMENT_ANXIETY] * 0.20 + traits[T_ANXIETY_PRONENESS] * 0.10
+    sp[I_IRRITATION] += traits[T_ANGER_REACTIVITY] * 0.15 - traits[T_EMOTIONAL_STABILITY] * 0.10
+    sp[I_LONGING]    += traits[T_ATTACHMENT_ANXIETY] * 0.15
+    sp[I_SOCIAL_BATTERY] += traits[T_EMOTIONAL_STABILITY] * 0.05
+    sp[I_MENTAL_FATIGUE] -= traits[T_EMOTIONAL_STABILITY] * 0.08 + traits[T_ANXIETY_PRONENESS] * 0.05
 
-    return soft_clamp(sp, 0.05, 0.95)
+    return np.clip(sp, -0.9, 0.9)
 
 
 def compute_rel_setpoint(traits: np.ndarray) -> np.ndarray:
@@ -65,17 +64,16 @@ def compute_rel_setpoint(traits: np.ndarray) -> np.ndarray:
     依恋焦虑 → 依赖基线高
     """
     sp = DEFAULT_RELATIONSHIP.copy()
-    t_dev = traits - 0.5
 
-    sp[R_TRUST]             -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_AFFECTION]         -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.10
-    sp[R_DEPENDENCY]        -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_DEPENDENCY]        += t_dev[T_ATTACHMENT_ANXIETY] * 0.10
-    sp[R_EMOTIONAL_SAFETY]  -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.12
-    sp[R_FAMILIARITY]       -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.05
-    sp[R_ROMANTIC_TENSION]  += t_dev[T_ATTACHMENT_ANXIETY] * 0.05
+    sp[R_TRUST]             -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_AFFECTION]         -= traits[T_ATTACHMENT_AVOIDANCE] * 0.10
+    sp[R_DEPENDENCY]        -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_DEPENDENCY]        += traits[T_ATTACHMENT_ANXIETY] * 0.10
+    sp[R_EMOTIONAL_SAFETY]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12
+    sp[R_FAMILIARITY]       -= traits[T_ATTACHMENT_AVOIDANCE] * 0.05
+    sp[R_ROMANTIC_TENSION]  += traits[T_ATTACHMENT_ANXIETY] * 0.05
 
-    return soft_clamp(sp, 0.02, 0.98)
+    return np.clip(sp, -0.96, 0.96)
 
 
 def update_internal_state(
@@ -108,11 +106,10 @@ def update_internal_state(
 
     # ── α: 跨维度耦合速率 ──
     # 由 traits 决定。开放→耦合快，稳定→耦合慢（更独立），信任→耦合快。
-    alpha = (
-        traits[T_EMOTIONAL_OPENNESS] * 0.30 +
-        (1.0 - traits[T_EMOTIONAL_STABILITY]) * 0.15 +
-        relationship[R_TRUST] * 0.12
-    )
+    alpha = 0.285
+    alpha += traits[T_EMOTIONAL_OPENNESS] * 0.15
+    alpha -= traits[T_EMOTIONAL_STABILITY] * 0.075
+    alpha += relationship[R_TRUST] * 0.06
     alpha = soft_clamp(alpha, 0.02, 0.35)
 
     # ── β: 刺激接受速率 ──
@@ -124,10 +121,10 @@ def update_internal_state(
 
     # ── γ: 稳态恢复速率 ──
     # 稳定→恢复快，乐观→恢复快，焦虑→恢复慢，去激活→恢复慢（放不下）。
-    gamma = 0.08
-    gamma += traits[T_EMOTIONAL_STABILITY] * 0.10
-    gamma += traits[T_OPTIMISM] * 0.06
-    gamma -= traits[T_ANXIETY_PRONENESS] * 0.06
+    gamma = 0.13
+    gamma += traits[T_EMOTIONAL_STABILITY] * 0.05
+    gamma += traits[T_OPTIMISM] * 0.03
+    gamma -= traits[T_ANXIETY_PRONENESS] * 0.03
     gamma -= deact.mean() * 0.08  # 去激活高的人更难恢复（放不下）
     gamma = soft_clamp(gamma, 0.01, 0.25)
 
@@ -145,7 +142,7 @@ def update_internal_state(
 
     # ── 残差更新 ──
     delta = alpha * delta_coupling + beta * delta_stimulus + gamma * delta_homeostatic
-    return soft_clamp(current + dt * delta, 0.0, 1.0)
+    return soft_clamp(current + dt * delta, -1.0, 1.0)
 
 
 def update_relationship_state(
@@ -162,19 +159,20 @@ def update_relationship_state(
       - γ_rel 更小（关系稳态恢复极慢）
     """
     # ── α_rel: 关系跨维度耦合速率 ──
-    alpha = (
-        traits[T_EMOTIONAL_OPENNESS] * 0.04 +
-        current[R_TRUST] * 0.03 +
-        current[R_EMOTIONAL_SAFETY] * 0.02
-    )
+    alpha = 0.045
+    alpha += traits[T_EMOTIONAL_OPENNESS] * 0.02
+    alpha += current[R_TRUST] * 0.015
+    alpha += current[R_EMOTIONAL_SAFETY] * 0.01
     alpha = soft_clamp(alpha, 0.005, 0.06)
 
     # ── β_rel: 关系刺激接受速率 ──
-    beta = 0.02 + traits[T_ATTACHMENT_ANXIETY] * 0.015
+    beta = 0.0275
+    beta += traits[T_ATTACHMENT_ANXIETY] * 0.0075
     beta = soft_clamp(beta, 0.002, 0.06)
 
     # ── γ_rel: 关系稳态恢复速率 ──
-    gamma = 0.005 + traits[T_EMOTIONAL_STABILITY] * 0.005
+    gamma = 0.0075
+    gamma += traits[T_EMOTIONAL_STABILITY] * 0.0025
     gamma = soft_clamp(gamma, 0.001, 0.02)
 
     # ── 三项 Δ ──
@@ -184,4 +182,4 @@ def update_relationship_state(
     delta_homeostatic = setpoint - current
 
     delta = alpha * delta_coupling + beta * delta_stimulus + gamma * delta_homeostatic
-    return soft_clamp(current + dt * delta, 0.0, 1.0)
+    return soft_clamp(current + dt * delta, -1.0, 1.0)

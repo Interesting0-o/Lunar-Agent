@@ -48,7 +48,6 @@ def compute_defense_profiles(
     每个剖面 ∈ [0, 1]，值越高 = 该防御对该类刺激越活跃。
     """
     profiles = np.zeros((2, ST_SIZE), dtype=np.float64)
-    t_dev = traits - 0.5  # 特质偏离中性
 
     # ═══════════════════════════════════════════════════════════
     # Profile 0 — Deactivation (去激活)
@@ -67,28 +66,28 @@ def compute_defense_profiles(
     deact = np.zeros(ST_SIZE, dtype=np.float64)
 
     # 人格基线: 每种刺激天然被隐藏的程度不同
-    deact[ST_ABANDONMENT] = 0.30 + t_dev[T_PRIDE] * 0.45 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.18
-    deact[ST_VALIDATION]  = 0.25 + t_dev[T_PRIDE] * 0.40
-    deact[ST_DEPENDENCY]  = 0.28 + t_dev[T_PRIDE] * 0.38 + t_dev[T_ATTACHMENT_AVOIDANCE] * 0.20
-    deact[ST_CLOSENESS]   = 0.15 + t_dev[T_PRIDE] * 0.18 + t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
-    deact[ST_CONFLICT]    = 0.20 + t_dev[T_PRIDE] * 0.28 + t_dev[T_ANGER_REACTIVITY] * 0.22
-    deact[ST_TEASING]     = 0.20 + t_dev[T_PRIDE] * 0.32
-    deact[ST_EMOTIONAL_WEIGHT] = 0.25 + t_dev[T_PRIDE] * 0.28
+    deact[ST_ABANDONMENT] = 0.30 + traits[T_PRIDE] * 0.225 + traits[T_JEALOUSY_SENSITIVITY] * 0.09
+    deact[ST_VALIDATION]  = 0.25 + traits[T_PRIDE] * 0.20
+    deact[ST_DEPENDENCY]  = 0.28 + traits[T_PRIDE] * 0.19 + traits[T_ATTACHMENT_AVOIDANCE] * 0.10
+    deact[ST_CLOSENESS]   = 0.15 + traits[T_PRIDE] * 0.09 + traits[T_ATTACHMENT_AVOIDANCE] * 0.075
+    deact[ST_CONFLICT]    = 0.20 + traits[T_PRIDE] * 0.14 + traits[T_ANGER_REACTIVITY] * 0.11
+    deact[ST_TEASING]     = 0.20 + traits[T_PRIDE] * 0.16
+    deact[ST_EMOTIONAL_WEIGHT] = 0.25 + traits[T_PRIDE] * 0.14
 
     # 去激活调制器（全局）
     # 情绪稳定 → 真淡定，不需要去激活
-    deact -= t_dev[T_EMOTIONAL_STABILITY] * 0.22
+    deact -= traits[T_EMOTIONAL_STABILITY] * 0.11
     # 情绪开放 → 愿意流露，去激活低
-    deact -= t_dev[T_EMOTIONAL_OPENNESS] * 0.12
+    deact -= traits[T_EMOTIONAL_OPENNESS] * 0.06
     # 依恋回避 → 全局增强去激活（情感疏离是回避的核心特征）
-    deact += t_dev[T_ATTACHMENT_AVOIDANCE] * 0.18
+    deact += traits[T_ATTACHMENT_AVOIDANCE] * 0.09
 
     # 关系调制: 信任和情感安全感降低去激活（安全基地效应）
-    rel_loosen = 1.0 - relationship[R_TRUST] * 0.22 - relationship[R_EMOTIONAL_SAFETY] * 0.18
+    rel_loosen = 1.0 - relationship[R_TRUST] * 0.11 - relationship[R_EMOTIONAL_SAFETY] * 0.09
     deact *= rel_loosen
 
     # 内部急性推动: 压力和不安加剧去激活（越难受越藏）
-    deact += internal[I_STRESS] * 0.10 + internal[I_INSECURITY] * 0.08
+    deact += internal[I_STRESS] * 0.05 + internal[I_INSECURITY] * 0.04
 
     profiles[0] = _sigmoid(deact - 0.48)
 
@@ -107,24 +106,24 @@ def compute_defense_profiles(
     # ═══════════════════════════════════════════════════════════
     hyper = np.zeros(ST_SIZE, dtype=np.float64)
 
-    hyper[ST_ABANDONMENT] = 0.45 + t_dev[T_ATTACHMENT_ANXIETY] * 0.55 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.30
-    hyper[ST_CLOSENESS]   = 0.30 + t_dev[T_ATTACHMENT_ANXIETY] * 0.50
-    hyper[ST_DEPENDENCY]  = 0.35 + t_dev[T_ATTACHMENT_ANXIETY] * 0.40
-    hyper[ST_VALIDATION]  = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.20
-    hyper[ST_CONFLICT]    = 0.15 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
-    hyper[ST_TEASING]     = 0.10 + t_dev[T_JEALOUSY_SENSITIVITY] * 0.20
-    hyper[ST_EMOTIONAL_WEIGHT] = 0.20 + t_dev[T_ATTACHMENT_ANXIETY] * 0.30
+    hyper[ST_ABANDONMENT] = 0.45 + traits[T_ATTACHMENT_ANXIETY] * 0.275 + traits[T_JEALOUSY_SENSITIVITY] * 0.15
+    hyper[ST_CLOSENESS]   = 0.30 + traits[T_ATTACHMENT_ANXIETY] * 0.25
+    hyper[ST_DEPENDENCY]  = 0.35 + traits[T_ATTACHMENT_ANXIETY] * 0.20
+    hyper[ST_VALIDATION]  = 0.15 + traits[T_ATTACHMENT_ANXIETY] * 0.10
+    hyper[ST_CONFLICT]    = 0.15 + traits[T_ATTACHMENT_ANXIETY] * 0.15
+    hyper[ST_TEASING]     = 0.10 + traits[T_JEALOUSY_SENSITIVITY] * 0.10
+    hyper[ST_EMOTIONAL_WEIGHT] = 0.20 + traits[T_ATTACHMENT_ANXIETY] * 0.15
 
     # 敏感度: 全局增强过度激活（敏感的人所有刺激都感受更深）
-    hyper += t_dev[T_SENSITIVITY] * 0.08
+    hyper += traits[T_SENSITIVITY] * 0.04
     # 依恋回避 → 全局降低过度激活（回避型抑制依恋系统激活）
-    hyper -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.30
+    hyper -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
 
     # 关系调制: 好感/浪漫张力 → 放大依恋系统的反应
-    hyper *= 1.0 + relationship[R_AFFECTION] * 0.18 + relationship[R_ROMANTIC_TENSION] * 0.10
+    hyper *= 1.0 + relationship[R_AFFECTION] * 0.09 + relationship[R_ROMANTIC_TENSION] * 0.05
 
     # 内部急性推动: 不安全感/渴望 → 依恋系统激活
-    hyper += internal[I_INSECURITY] * 0.12 + internal[I_LONGING] * 0.08
+    hyper += internal[I_INSECURITY] * 0.06 + internal[I_LONGING] * 0.04
 
     profiles[1] = _sigmoid(hyper - 0.50)
 

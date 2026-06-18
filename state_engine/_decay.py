@@ -96,14 +96,12 @@ def _compute_internal_personality_mod(traits: np.ndarray) -> float:
     文献: Schuyler et al. (2014) — 杏仁核恢复速度预测神经质;
           Lücke et al. (2024) — 高神经质 → 更慢的压力恢复
     """
-    t_dev = traits - 0.5
-
     mod = 1.0
-    mod += t_dev[T_EMOTIONAL_STABILITY]  * 0.30   # 稳定→恢复快
-    mod += t_dev[T_OPTIMISM]            * 0.15   # 乐观→恢复快
-    mod -= t_dev[T_ANXIETY_PRONENESS]   * 0.25   # 焦虑→恢复慢
-    mod -= t_dev[T_ANGER_REACTIVITY]    * 0.10   # 易怒→恢复慢
-    mod += t_dev[T_EMOTIONAL_OPENNESS]  * 0.10   # 开放→恢复快
+    mod += traits[T_EMOTIONAL_STABILITY]  * 0.15   # 稳定→恢复快
+    mod += traits[T_OPTIMISM]            * 0.075  # 乐观→恢复快
+    mod -= traits[T_ANXIETY_PRONENESS]   * 0.125  # 焦虑→恢复慢
+    mod -= traits[T_ANGER_REACTIVITY]    * 0.05   # 易怒→恢复慢
+    mod += traits[T_EMOTIONAL_OPENNESS]  * 0.05   # 开放→恢复快
 
     return soft_clamp(mod, 0.3, 2.0)  # 最快 2×, 最慢 0.3×
 
@@ -114,12 +112,10 @@ def _compute_relationship_personality_mod(traits: np.ndarray) -> float:
     文献: Bhattacharya et al. (2017) — 回避型更容易疏远;
           Pellegrini (1977) — 依恋焦虑→放不下
     """
-    t_dev = traits - 0.5
-
     mod = 1.0
-    mod += t_dev[T_ATTACHMENT_AVOIDANCE]  * 0.35   # 回避→疏远快
-    mod -= t_dev[T_ATTACHMENT_ANXIETY]    * 0.20   # 焦虑→放不下
-    mod -= t_dev[T_EMOTIONAL_STABILITY]   * 0.10   # 稳定→关系稳定
+    mod += traits[T_ATTACHMENT_AVOIDANCE]  * 0.175  # 回避→疏远快
+    mod -= traits[T_ATTACHMENT_ANXIETY]    * 0.10   # 焦虑→放不下
+    mod -= traits[T_EMOTIONAL_STABILITY]   * 0.05   # 稳定→关系稳定
 
     return soft_clamp(mod, 0.3, 2.0)
 
@@ -186,7 +182,7 @@ def apply_time_decay_internal(
     decay_factor = np.exp(-lam * delta_hours)
     decayed = setpoint + deviation * decay_factor
 
-    return soft_clamp(decayed, 0.0, 1.0)
+    return soft_clamp(decayed, -1.0, 1.0)
 
 
 def apply_time_decay_relationship(
@@ -221,7 +217,7 @@ def apply_time_decay_relationship(
     decay_factor = np.exp(-lam * delta_hours)
     decayed = setpoint + deviation * decay_factor
 
-    return soft_clamp(decayed, 0.0, 1.0)
+    return soft_clamp(decayed, -1.0, 1.0)
 
 
 def apply_time_decay(
@@ -262,32 +258,30 @@ def _compute_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
     """内部状态稳态基线 — 复制自 dynamics.compute_setpoint。"""
     from state import DEFAULT_INTERNAL
     sp = DEFAULT_INTERNAL.copy()
-    t_dev = traits - 0.5
 
-    sp[I_ENERGY]     += t_dev[T_OPTIMISM] * 0.15 - t_dev[T_ANXIETY_PRONENESS] * 0.08
-    sp[I_STRESS]     += t_dev[T_ANXIETY_PRONENESS] * 0.20 + t_dev[T_ANGER_REACTIVITY] * 0.05
-    sp[I_LONELINESS] += t_dev[T_ATTACHMENT_ANXIETY] * 0.10 - t_dev[T_OPTIMISM] * 0.05
-    sp[I_INSECURITY] += t_dev[T_ATTACHMENT_ANXIETY] * 0.20 + t_dev[T_ANXIETY_PRONENESS] * 0.10
-    sp[I_IRRITATION] += t_dev[T_ANGER_REACTIVITY] * 0.15 - t_dev[T_EMOTIONAL_STABILITY] * 0.10
-    sp[I_LONGING]    += t_dev[T_ATTACHMENT_ANXIETY] * 0.15
-    sp[I_SOCIAL_BATTERY] += t_dev[T_EMOTIONAL_STABILITY] * 0.05
-    sp[I_MENTAL_FATIGUE] -= t_dev[T_EMOTIONAL_STABILITY] * 0.08 + t_dev[T_ANXIETY_PRONENESS] * 0.05
+    sp[I_ENERGY]     += traits[T_OPTIMISM] * 0.15 - traits[T_ANXIETY_PRONENESS] * 0.08
+    sp[I_STRESS]     += traits[T_ANXIETY_PRONENESS] * 0.20 + traits[T_ANGER_REACTIVITY] * 0.05
+    sp[I_LONELINESS] += traits[T_ATTACHMENT_ANXIETY] * 0.10 - traits[T_OPTIMISM] * 0.05
+    sp[I_INSECURITY] += traits[T_ATTACHMENT_ANXIETY] * 0.20 + traits[T_ANXIETY_PRONENESS] * 0.10
+    sp[I_IRRITATION] += traits[T_ANGER_REACTIVITY] * 0.15 - traits[T_EMOTIONAL_STABILITY] * 0.10
+    sp[I_LONGING]    += traits[T_ATTACHMENT_ANXIETY] * 0.15
+    sp[I_SOCIAL_BATTERY] += traits[T_EMOTIONAL_STABILITY] * 0.05
+    sp[I_MENTAL_FATIGUE] -= traits[T_EMOTIONAL_STABILITY] * 0.08 + traits[T_ANXIETY_PRONENESS] * 0.05
 
-    return soft_clamp(sp, 0.05, 0.95)
+    return np.clip(sp, -0.9, 0.9)
 
 
 def _compute_rel_setpoint_for_decay(traits: np.ndarray) -> np.ndarray:
     """关系状态稳态基线 — 复制自 dynamics.compute_rel_setpoint。"""
     from state import DEFAULT_RELATIONSHIP
     sp = DEFAULT_RELATIONSHIP.copy()
-    t_dev = traits - 0.5
 
-    sp[R_TRUST]             -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_AFFECTION]         -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.10
-    sp[R_DEPENDENCY]        -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_DEPENDENCY]        += t_dev[T_ATTACHMENT_ANXIETY] * 0.10
-    sp[R_EMOTIONAL_SAFETY]  -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.12
-    sp[R_FAMILIARITY]       -= t_dev[T_ATTACHMENT_AVOIDANCE] * 0.05
-    sp[R_ROMANTIC_TENSION]  += t_dev[T_ATTACHMENT_ANXIETY] * 0.05
+    sp[R_TRUST]             -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_AFFECTION]         -= traits[T_ATTACHMENT_AVOIDANCE] * 0.10
+    sp[R_DEPENDENCY]        -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_DEPENDENCY]        += traits[T_ATTACHMENT_ANXIETY] * 0.10
+    sp[R_EMOTIONAL_SAFETY]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12
+    sp[R_FAMILIARITY]       -= traits[T_ATTACHMENT_AVOIDANCE] * 0.05
+    sp[R_ROMANTIC_TENSION]  += traits[T_ATTACHMENT_ANXIETY] * 0.05
 
-    return soft_clamp(sp, 0.02, 0.98)
+    return np.clip(sp, -0.96, 0.96)

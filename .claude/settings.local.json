@@ -28,7 +28,8 @@
       "WebFetch(domain:export.arxiv.org)",
       "WebFetch(domain:www.langchain.com)",
       "WebFetch(domain:www.digitalocean.com)",
-      "WebFetch(domain:changelog.langchain.com)"
+      "WebFetch(domain:changelog.langchain.com)",
+      "Bash(uv add *)"
     ]
   }
 }

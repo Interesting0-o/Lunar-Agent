@@ -182,11 +182,12 @@ def _format_memory_context(
 
     for i, (node, score) in enumerate(memories, 1):
         # 相似度 → 模糊的"熟悉感"描述
-        if score >= 0.95:
+        # 注意：状态值改为 [-1, 1] 后 cosine 可为负，阈值相应下调
+        if score >= 0.90:
             feeling = "几乎一模一样"
-        elif score >= 0.85:
+        elif score >= 0.70:
             feeling = "非常相似"
-        elif score >= 0.75:
+        elif score >= 0.50:
             feeling = "有些熟悉"
         else:
             feeling = "隐约相关"

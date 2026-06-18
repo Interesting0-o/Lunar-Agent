@@ -5,26 +5,28 @@ import numpy as np
 
 def soft_clamp(
     x: np.ndarray,
-    low: float = 0.0,
+    low: float = -1.0,
     high: float = 1.0,
     transition: float = 0.1,
 ) -> np.ndarray:
-    """软饱和裁剪。
+    """软饱和裁剪 —— 区间内恒等，边界外 tanh 软饱和。
 
-    [low, high] 区间内 = np.clip（完全兼容）。
-    区间外用 tanh 平滑压回，保留"超出量"信息，有明确渐近线。
+    与硬 clip 的差异：超出 [low, high] 的值通过 tanh 平滑饱和，
+    保证 C¹ 连续且单调。区间内的值完全不变（恒等映射）。
 
-    行为（transition=0.1, low=0, high=1）:
-      x=1.00   → 1.0000
-      x=1.05   → 0.9975
-      x=1.10   → 0.9999
-      x=2.00   → 1.0000
+    行为（transition=0.1, low=-1, high=1）:
+      x=−∞    → low − transition  ≈ −1.1（tanh 渐近）
+      x=−1.00 → −1.0（恒等）
+      x=0.00  → 0.0（恒等）
+      x=1.00  → 1.0（恒等）
+      x=+∞    → high + transition ≈ 1.1（tanh 渐近）
     """
+    # tanh 软饱和仅应用于超出边界的值
     upper_delta = x - high
-    upper_output = high - transition * np.tanh(upper_delta / transition)
+    upper_output = high + transition * np.tanh(upper_delta / transition)
 
     lower_delta = low - x
-    lower_output = low + transition * np.tanh(lower_delta / transition)
+    lower_output = low - transition * np.tanh(lower_delta / transition)
 
     return np.where(
         x > high, upper_output,
@@ -43,8 +45,9 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 
 
 def _sigmoid_gate(raw: np.ndarray) -> np.ndarray:
-    """门控专用 sigmoid 激活：中点居中（raw-0.5），值域 (0, 1）。
+    """门控专用 sigmoid 激活：值域 (0, 1），raw=0 时输出 0.5。
 
     与 np.clip 的差异：硬阈值 → 软阈值，符合心理学"防御机制软启动"。
+    raw 已是 [-1, 1] 中性状态值，无需人工居中。
     """
-    return _sigmoid(raw - 0.5)
+    return _sigmoid(raw)

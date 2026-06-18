@@ -31,16 +31,16 @@ def project_surface(
     """④ 表面投影：内部状态 + outer_stimuli → 表面表达（动态计算）。"""
     s = np.zeros(S_SIZE, dtype=np.float64)
 
-    # 内部状态基线
-    s[S_EXPRESSIVENESS] = 0.3 + internal[I_ENERGY] * 0.4 - internal[I_MENTAL_FATIGUE] * 0.3
-    s[S_WARMTH]         = 0.3 + relationship[R_AFFECTION] * 0.4 - internal[I_STRESS] * 0.2
-    s[S_SHARPNESS]      = 0.1 + internal[I_IRRITATION] * 0.5 + internal[I_STRESS] * 0.2
-    s[S_SOFTNESS]       = 0.2 + (1.0 - internal[I_STRESS]) * 0.3 + relationship[R_EMOTIONAL_SAFETY] * 0.2
-    s[S_ENTHUSIASM]     = 0.3 + internal[I_ENERGY] * 0.5 - internal[I_MENTAL_FATIGUE] * 0.3
-    s[S_RESTRAINT]      = 0.2 + internal[I_INSECURITY] * 0.3 + traits[T_PRIDE] * 0.2
-    s[S_VULNERABILITY]  = 0.1 + internal[I_LONELINESS] * 0.3 + internal[I_LONGING] * 0.2 - traits[T_PRIDE] * 0.2
+    # 内部状态基线（值域 [-1, 1]）
+    s[S_EXPRESSIVENESS] = -0.3 + internal[I_ENERGY] * 0.4 - internal[I_MENTAL_FATIGUE] * 0.3
+    s[S_WARMTH]         = -0.2 + relationship[R_AFFECTION] * 0.4 - internal[I_STRESS] * 0.2
+    s[S_SHARPNESS]      = -0.1 + internal[I_IRRITATION] * 0.5 + internal[I_STRESS] * 0.2
+    s[S_SOFTNESS]       = -0.1 - internal[I_STRESS] * 0.3 + relationship[R_EMOTIONAL_SAFETY] * 0.2
+    s[S_ENTHUSIASM]     = -0.2 + internal[I_ENERGY] * 0.5 - internal[I_MENTAL_FATIGUE] * 0.3
+    s[S_RESTRAINT]      = -0.1 + internal[I_INSECURITY] * 0.3 + traits[T_PRIDE] * 0.2
+    s[S_VULNERABILITY]  = -0.5 + internal[I_LONELINESS] * 0.3 + internal[I_LONGING] * 0.2 - traits[T_PRIDE] * 0.2
 
-    # 外表情刺激的直接影响（被压抑后的版本）
+    # 外表情刺激的直接影响（被压抑后的版本，stimuli 仍在 [0, 1]）
     s[S_WARMTH]         += outer_stimuli[ST_VALIDATION]  * 0.30
     s[S_SHARPNESS]      += outer_stimuli[ST_CONFLICT]    * 0.25
     s[S_SOFTNESS]       += outer_stimuli[ST_CLOSENESS]   * 0.20
@@ -49,16 +49,16 @@ def project_surface(
     s[S_SHARPNESS]      += outer_stimuli[ST_TEASING]     * 0.10
     s[S_WARMTH]         += outer_stimuli[ST_DEPENDENCY]  * 0.10
 
-    # 特质修饰 — 连续贡献（sigmoid 软阈值，无缝过渡）
-    pride_active = _sigmoid((traits[T_PRIDE] - 0.5) / 0.15)
+    # 特质修饰 — 连续贡献（sigmoid 软阈值，traits 已以 0 为中心）
+    pride_active = _sigmoid(traits[T_PRIDE] / 0.30)
     s[S_SHARPNESS]     += pride_active * traits[T_PRIDE] * 0.10
     s[S_VULNERABILITY] -= pride_active * traits[T_PRIDE] * 0.15
 
-    openness_active = _sigmoid((traits[T_EMOTIONAL_OPENNESS] - 0.5) / 0.15)
+    openness_active = _sigmoid(traits[T_EMOTIONAL_OPENNESS] / 0.30)
     s[S_EXPRESSIVENESS] += openness_active * traits[T_EMOTIONAL_OPENNESS] * 0.10
     s[S_RESTRAINT]      -= openness_active * traits[T_EMOTIONAL_OPENNESS] * 0.10
 
-    optimism_active = _sigmoid((traits[T_OPTIMISM] - 0.5) / 0.15)
+    optimism_active = _sigmoid(traits[T_OPTIMISM] / 0.30)
     s[S_ENTHUSIASM]    += optimism_active * traits[T_OPTIMISM] * 0.10
 
-    return soft_clamp(s, 0.0, 1.0)
+    return soft_clamp(s, -1.0, 1.0)

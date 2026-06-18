@@ -55,13 +55,13 @@ else:
 # 由 State Engine 根据内部状态与 Traits 计算得出。
 # ═══════════════════════════════════════════════════════════════
 
-S_EXPRESSIVENESS = 0   # 情绪外露程度（0=内敛, 1=奔放）
-S_WARMTH = 1           # 语气温度（0=冰冷, 1=温暖）
-S_SHARPNESS = 2        # 攻击性/尖锐感（0=温和, 1=尖锐）
-S_SOFTNESS = 3         # 柔和度（0=生硬, 1=柔软）
-S_ENTHUSIASM = 4       # 活力/热情（0=低沉, 1=高涨）
-S_RESTRAINT = 5        # 克制程度（0=直白, 1=克制）
-S_VULNERABILITY = 6    # 脆弱感（0=坚强, 1=脆弱）
+S_EXPRESSIVENESS = 0   # 情绪外露程度（-1=内敛, 0=中性, +1=奔放）
+S_WARMTH = 1           # 语气温度（-1=冰冷, 0=中性, +1=温暖）
+S_SHARPNESS = 2        # 攻击性/尖锐感（-1=温和, 0=中性, +1=尖锐）
+S_SOFTNESS = 3         # 柔和度（-1=生硬, 0=中性, +1=柔软）
+S_ENTHUSIASM = 4       # 活力/热情（-1=低沉, 0=中性, +1=高涨）
+S_RESTRAINT = 5        # 克制程度（-1=直白, 0=中性, +1=克制）
+S_VULNERABILITY = 6    # 脆弱感（-1=坚强, 0=中性, +1=脆弱）
 S_SIZE = 7
 
 S_LABELS = [
@@ -76,16 +76,16 @@ S_LABEL_IDX = {k: i for i, k in enumerate(S_LABELS)}
 # 分三组：基础性格、负面倾向、依恋模式。
 # ═══════════════════════════════════════════════════════════════
 
-T_SENSITIVITY = 0           # 敏感度（0=迟钝, 1=敏感）
-T_PRIDE = 1                 # 自尊心（0=自卑, 1=高傲）
-T_EMOTIONAL_OPENNESS = 2    # 情绪开放性（0=封闭, 1=敞开）
-T_EMOTIONAL_STABILITY = 3   # 情绪稳定性（0=波动, 1=稳定）
-T_OPTIMISM = 4              # 乐观倾向（0=悲观, 1=乐观）
-T_ANXIETY_PRONENESS = 5     # 焦虑倾向（0=松弛, 1=易焦虑）
-T_ANGER_REACTIVITY = 6      # 易怒倾向（0=平和, 1=易怒）
-T_JEALOUSY_SENSITIVITY = 7  # 嫉妒敏感度（0=不在意, 1=易嫉妒）
-T_ATTACHMENT_ANXIETY = 8    # 依恋焦虑（0=安全, 1=害怕被抛弃）
-T_ATTACHMENT_AVOIDANCE = 9  # 依恋回避（0=亲近, 1=疏离）
+T_SENSITIVITY = 0           # 敏感度（-1=迟钝, 0=中性, +1=敏感）
+T_PRIDE = 1                 # 自尊心（-1=自卑, 0=中性, +1=高傲）
+T_EMOTIONAL_OPENNESS = 2    # 情绪开放性（-1=封闭, 0=中性, +1=敞开）
+T_EMOTIONAL_STABILITY = 3   # 情绪稳定性（-1=波动, 0=中性, +1=稳定）
+T_OPTIMISM = 4              # 乐观倾向（-1=悲观, 0=中性, +1=乐观）
+T_ANXIETY_PRONENESS = 5     # 焦虑倾向（-1=松弛, 0=中性, +1=易焦虑）
+T_ANGER_REACTIVITY = 6      # 易怒倾向（-1=平和, 0=中性, +1=易怒）
+T_JEALOUSY_SENSITIVITY = 7  # 嫉妒敏感度（-1=不在意, 0=中性, +1=易嫉妒）
+T_ATTACHMENT_ANXIETY = 8    # 依恋焦虑（-1=安全, 0=中性, +1=害怕被抛弃）
+T_ATTACHMENT_AVOIDANCE = 9  # 依恋回避（-1=亲近, 0=中性, +1=疏离）
 T_SIZE = 10
 
 T_LABELS = [
@@ -100,14 +100,14 @@ T_LABEL_IDX = {k: i for i, k in enumerate(T_LABELS)}
 # 底层心理指标，受对话事件影响而变化。
 # ═══════════════════════════════════════════════════════════════
 
-I_ENERGY = 0            # 精力/能量（0=耗尽, 1=充沛）
-I_STRESS = 1            # 压力（0=放松, 1=高压）
-I_LONELINESS = 2        # 孤独感（0=充实, 1=孤独）
-I_INSECURITY = 3        # 不安全感（0=自信, 1=不安）
-I_IRRITATION = 4        # 烦躁程度（0=平静, 1=烦躁）
-I_LONGING = 5           # 渴望/思念（0=淡然, 1=强烈渴望）
-I_SOCIAL_BATTERY = 6    # 社交电量（0=耗尽, 1=满电）
-I_MENTAL_FATIGUE = 7    # 精神疲劳（0=清醒, 1=疲惫）
+I_ENERGY = 0            # 精力/能量（-1=耗尽, 0=正常, +1=充沛）
+I_STRESS = 1            # 压力（-1=深度放松, 0=正常, +1=高压）
+I_LONELINESS = 2        # 孤独感（-1=充实, 0=正常, +1=孤独）
+I_INSECURITY = 3        # 不安全感（-1=自信, 0=正常, +1=不安）
+I_IRRITATION = 4        # 烦躁程度（-1=平静, 0=正常, +1=烦躁）
+I_LONGING = 5           # 渴望/思念（-1=淡然, 0=正常, +1=强烈渴望）
+I_SOCIAL_BATTERY = 6    # 社交电量（-1=透支, 0=正常, +1=满电）
+I_MENTAL_FATIGUE = 7    # 精神疲劳（-1=异常清醒, 0=正常, +1=疲惫）
 I_SIZE = 8
 
 I_LABELS = [
@@ -121,12 +121,12 @@ I_LABEL_IDX = {k: i for i, k in enumerate(I_LABELS)}
 # AI 与用户之间的互动累积感知。
 # ═══════════════════════════════════════════════════════════════
 
-R_AFFECTION = 0            # 好感度（0=冷淡, 1=喜爱）
-R_TRUST = 1                # 信任度（0=怀疑, 1=信任）
-R_FAMILIARITY = 2          # 熟悉度（0=陌生, 1=亲密）
-R_DEPENDENCY = 3           # 情感依赖（0=独立, 1=依赖）
-R_EMOTIONAL_SAFETY = 4     # 情感安全感（0=不安, 1=安全）
-R_ROMANTIC_TENSION = 5     # 浪漫张力（0=无感, 1=强烈）
+R_AFFECTION = 0            # 好感度（-1=厌恶, 0=中性, +1=喜爱）
+R_TRUST = 1                # 信任度（-1=怀疑, 0=中性, +1=信任）
+R_FAMILIARITY = 2          # 熟悉度（-1=陌生, 0=中性, +1=亲密）
+R_DEPENDENCY = 3           # 情感依赖（-1=被依赖/负担, 0=独立, +1=依赖）
+R_EMOTIONAL_SAFETY = 4     # 情感安全感（-1=不安, 0=中性, +1=安全）
+R_ROMANTIC_TENSION = 5     # 浪漫张力（-1=排斥, 0=无感, +1=强烈）
 R_SIZE = 6
 
 R_LABELS = [
@@ -164,7 +164,7 @@ ST_LABEL_IDX = {k: i for i, k in enumerate(ST_LABELS)}
 # ═══════════════════════════════════════════════════════════════
 # GateVector — 门控向量（4 维）
 # 控制心理刺激在多大程度上能进入内部状态。
-# 每一维 [0,1]，0=完全关闭（刺激被阻挡），1=完全开放。
+# 每一维 [0,1]，0=完全关闭（刺激被阻挡），1=完全开放。（GateVector 保持 [0,1]，非心理状态向量）
 # ═══════════════════════════════════════════════════════════════
 
 G_SUPPRESSION = 0   # 压抑门：1=压抑一切情绪进入（防御姿态）
@@ -266,39 +266,40 @@ class State(TypedDict):
 
 # ── 人格特质（10 维） ──
 # 长期稳定的性格参数，目前以「月下誓约」人设为基准
+# 值域 [-1, 1]：-1=低极, 0=中性/正常, +1=高极
 DEFAULT_TRAITS: np.ndarray = np.array([
-    0.7,    # T_SENSITIVITY — 敏感度（偏高，容易感知情绪变化）
-    0.65,   # T_PRIDE — 自尊心（偏强，口是心非的资本）
-    0.6,    # T_EMOTIONAL_OPENNESS — 情绪开放性
-    0.5,    # T_EMOTIONAL_STABILITY — 情绪稳定性
-    0.55,   # T_OPTIMISM — 乐观倾向
-    0.6,    # T_ANXIETY_PRONENESS — 焦虑倾向（偏高，害怕被抛弃）
-    0.5,    # T_ANGER_REACTIVITY — 易怒倾向
-    0.7,    # T_JEALOUSY_SENSITIVITY — 嫉妒敏感度（偏高，独占欲强）
-    0.55,   # T_ATTACHMENT_ANXIETY — 依恋焦虑
-    0.2,    # T_ATTACHMENT_AVOIDANCE — 依恋回避（低，渴望亲近）
+     0.4,    # T_SENSITIVITY — 敏感度（偏高，容易感知情绪变化）
+     0.3,    # T_PRIDE — 自尊心（偏强，口是心非的资本）
+     0.2,    # T_EMOTIONAL_OPENNESS — 情绪开放性
+     0.0,    # T_EMOTIONAL_STABILITY — 情绪稳定性
+     0.1,    # T_OPTIMISM — 乐观倾向
+     0.2,    # T_ANXIETY_PRONENESS — 焦虑倾向（偏高，害怕被抛弃）
+     0.0,    # T_ANGER_REACTIVITY — 易怒倾向
+     0.4,    # T_JEALOUSY_SENSITIVITY — 嫉妒敏感度（偏高，独占欲强）
+     0.1,    # T_ATTACHMENT_ANXIETY — 依恋焦虑
+    -0.6,    # T_ATTACHMENT_AVOIDANCE — 依恋回避（低，渴望亲近）
 ], dtype=np.float64)
 
 # ── 内部状态（8 维） ──
-# 底层心理指标基线
+# 底层心理指标基线，值域 [-1, 1]
 DEFAULT_INTERNAL: np.ndarray = np.array([
-    0.7,    # I_ENERGY — 精力充沛
-    0.2,    # I_STRESS — 压力较低
-    0.3,    # I_LONELINESS — 略有孤独感
-    0.25,   # I_INSECURITY — 轻微不安
-    0.1,    # I_IRRITATION — 平静
-    0.4,    # I_LONGING — 有一定思念/渴望
-    0.6,    # I_SOCIAL_BATTERY — 社交电量尚可
-    0.15,   # I_MENTAL_FATIGUE — 精神清醒
+     0.4,    # I_ENERGY — 精力充沛
+    -0.6,    # I_STRESS — 压力较低
+    -0.4,    # I_LONELINESS — 略有孤独感
+    -0.5,    # I_INSECURITY — 轻微不安
+    -0.8,    # I_IRRITATION — 平静
+    -0.2,    # I_LONGING — 有一定思念/渴望
+     0.2,    # I_SOCIAL_BATTERY — 社交电量尚可
+    -0.7,    # I_MENTAL_FATIGUE — 精神清醒
 ], dtype=np.float64)
 
 # ── 关系状态（6 维） ──
-# 对用户的关系感知基线
+# 对用户的关系感知基线，值域 [-1, 1]
 DEFAULT_RELATIONSHIP: np.ndarray = np.array([
-    0.3,    # R_AFFECTION — 初始好感偏低
-    0.3,    # R_TRUST — 初始信任中立
-    0.2,    # R_FAMILIARITY — 初始陌生
-    0.15,   # R_DEPENDENCY — 初始独立
-    0.25,   # R_EMOTIONAL_SAFETY — 情感安全感偏低
-    0.2,    # R_ROMANTIC_TENSION — 浪漫张力较低
+    -0.4,    # R_AFFECTION — 初始好感偏低
+    -0.4,    # R_TRUST — 初始信任偏低
+    -0.6,    # R_FAMILIARITY — 初始陌生
+    -0.7,    # R_DEPENDENCY — 初始独立
+    -0.5,    # R_EMOTIONAL_SAFETY — 情感安全感偏低
+    -0.6,    # R_ROMANTIC_TENSION — 浪漫张力较低
 ], dtype=np.float64)
