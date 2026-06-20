@@ -190,7 +190,7 @@ for s in range(ST_SIZE):
 
 ### Deactivation (去激活)
 
-公式: `deact[s] = σ(raw[s] - 0.48)`, `raw = baseline + trait_dev + global_mod + rel_mod + internal_push`
+公式: `deact[s] = σ(5.0 × (raw[s] - 0.35))`, `raw = baseline + trait_dev + global_mod + rel_mod + internal_push`
 
 | 刺激维度 | 基线 | 主导特质 (+) | 主导特质 (−) | 关系调制 | 内部推动 |
 |---------|------|-------------|-------------|---------|---------|
@@ -206,7 +206,7 @@ for s in range(ST_SIZE):
 
 ### Hyperactivation (过度激活)
 
-公式: `hyper[s] = σ(raw[s] - 0.50)`, `raw = baseline + trait_dev + global_mod + rel_mod + internal_push`
+公式: `hyper[s] = σ(5.0 × (raw[s] - 0.38))`, `raw = baseline + trait_dev + global_mod + rel_mod + internal_push`
 
 | 刺激维度 | 基线 | 主导特质 (+) | 主导特质 (−) | 关系调制 | 内部推动 |
 |---------|------|-------------|-------------|---------|---------|
