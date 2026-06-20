@@ -207,9 +207,17 @@ def update_relationship_state(
     # 关系稳态恢复由 _decay.py 的时间衰减负责。
 
     # ── Δ_coupling: 关系跨维度耦合 + 自阻尼 ──
-    # 替代旧的 REL_STATE_COUPLING_A @ h − h
-    # 原矩阵经谱归一化（缩放 0.9441），自阻尼 ≈ 0.1503
-    REL_SELF_DECAY = np.full(R_SIZE, 0.15033222)
+    # 替代旧的 REL_STATE_COUPLING_A @ h − h，每维度独立自阻尼率。
+    # 全部关系维度 setpoint < 0（回避型依恋），统一 0.1503 产生向上回拉税。
+    # 更极端的回避维度（依赖/张力/熟悉度）阻尼更小，让角色保持距离感。
+    REL_SELF_DECAY = np.array([
+        0.12,  # R_AFFECTION         — setpoint -0.340
+        0.12,  # R_TRUST             — setpoint -0.310
+        0.10,  # R_FAMILIARITY       — setpoint -0.570, 慢熟
+        0.10,  # R_DEPENDENCY        — setpoint -0.600, 最独立
+        0.12,  # R_EMOTIONAL_SAFETY  — setpoint -0.428
+        0.10,  # R_ROMANTIC_TENSION  — setpoint -0.595, 慢热
+    ])
 
     rel_coupling = np.zeros(R_SIZE, dtype=np.float64)
     rel_coupling[R_TRUST]            += current[R_AFFECTION] * 0.075526      # 好感→信任

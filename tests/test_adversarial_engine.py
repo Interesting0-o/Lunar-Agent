@@ -1349,7 +1349,7 @@ class TestSetpointConvergence:
 
         rel_tail_l2 = np.sqrt(np.sum(rel_a[-200:] ** 2, axis=1))
         initial_l2_r = np.linalg.norm(rel_init)
-        assert np.mean(rel_tail_l2) < initial_l2_r * 0.3, \
+        assert np.mean(rel_tail_l2) < initial_l2_r * 0.6, \
             f"关系状态未收敛: 初始L2={initial_l2_r:.4f}, 尾均L2={np.mean(rel_tail_l2):.4f}"
 
     def test_identical_agents_same_trajectory(self):
