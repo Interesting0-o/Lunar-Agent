@@ -212,6 +212,76 @@ class TestDefenseDirectional:
             f"高稳定 deact={p_high[0].mean():.3f} ≥ 低稳定 deact={p_low[0].mean():.3f}"
         )
 
+    # ── 刺激特异性验证（2025-06 新增） ──
+
+    def test_stress_modulation_is_dimension_specific(self, default_traits, default_relationship):
+        """stress 对 deact 各维影响不同（不再是全局+0.05）。
+
+        旧版: stress 对 7 维均匀 +0.05/单位，各维 Δ 相同。
+        新版: stress 对 conflict 影响最大，对 teasing 影响最小（或为零）。
+        验证极差 > 0（即各维不等效）。
+        """
+        i_low = DEFAULT_INTERNAL.copy()
+        i_low[I_STRESS] = -0.8
+        i_high = DEFAULT_INTERNAL.copy()
+        i_high[I_STRESS] = 0.8
+
+        p_low = compute_defense_profiles(default_traits, default_relationship, i_low)
+        p_high = compute_defense_profiles(default_traits, default_relationship, i_high)
+
+        delta = p_high[0] - p_low[0]
+        dim_range = delta.max() - delta.min()
+
+        assert dim_range > 0.05, (
+            f"stress 对 deact 各维影响过于均匀，极差={dim_range:.4f}（应 > 0.05）\n"
+            f"  delta={np.array2string(delta, precision=4, suppress_small=True)}"
+        )
+
+    def test_trust_modulation_is_dimension_specific(self, default_traits, default_internal):
+        """trust 对 deact 各维影响不同（不再是全局乘法 -0.11）。
+
+        旧版: trust 对 7 维等比例缩放。
+        新版: trust 对 abandonment 影响最大，对 closeness 影响最小。
+        验证各维 Δ 不等效。
+        """
+        r_low = DEFAULT_RELATIONSHIP.copy()
+        r_low[R_TRUST] = -0.8
+        r_high = DEFAULT_RELATIONSHIP.copy()
+        r_high[R_TRUST] = 0.8
+
+        p_low = compute_defense_profiles(default_traits, r_low, default_internal)
+        p_high = compute_defense_profiles(default_traits, r_high, default_internal)
+
+        delta = p_high[0] - p_low[0]
+        dim_range = delta.max() - delta.min()
+
+        assert dim_range > 0.02, (
+            f"trust 对 deact 各维影响过于均匀，极差={dim_range:.4f}（应 > 0.02）\n"
+            f"  delta={np.array2string(delta, precision=4, suppress_small=True)}"
+        )
+
+    def test_insecurity_hyperactivation_is_dimension_specific(self, default_traits, default_relationship):
+        """insecurity 对 hyper 各维影响不同（不再是全局+0.06）。
+
+        旧版: insecurity 对 hyper 7 维均匀 +0.06/单位。
+        新版: 对 abandonment 影响最大，对 teasing 不影响。
+        """
+        i_low = DEFAULT_INTERNAL.copy()
+        i_low[I_INSECURITY] = -0.8
+        i_high = DEFAULT_INTERNAL.copy()
+        i_high[I_INSECURITY] = 0.8
+
+        p_low = compute_defense_profiles(default_traits, default_relationship, i_low)
+        p_high = compute_defense_profiles(default_traits, default_relationship, i_high)
+
+        delta = p_high[1] - p_low[1]
+        dim_range = delta.max() - delta.min()
+
+        assert dim_range > 0.05, (
+            f"insecurity 对 hyper 各维影响过于均匀，极差={dim_range:.4f}（应 > 0.05）\n"
+            f"  delta={np.array2string(delta, precision=4, suppress_small=True)}"
+        )
+
 
 class TestApplyDefenses:
     """apply_defenses: 防御应用后的 inner/outer 刺激不变式。"""
