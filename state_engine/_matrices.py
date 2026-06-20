@@ -73,9 +73,10 @@ def _build_rel_input_influence() -> np.ndarray:
     B[ST_ABANDONMENT, R_EMOTIONAL_SAFETY] = -0.10
     B[ST_ABANDONMENT, R_ROMANTIC_TENSION] = 0.06
     B[ST_ABANDONMENT, R_DEPENDENCY] = 0.08
-    # validation → affection↑, trust↑
+    # validation → affection↑, trust↑, tension↑
     B[ST_VALIDATION, R_AFFECTION] = 0.12
     B[ST_VALIDATION, R_TRUST] = 0.10
+    B[ST_VALIDATION, R_ROMANTIC_TENSION] = 0.05   # 被认可→心动
     # closeness → affection↑, familiarity↑, safety↑, tension↑
     B[ST_CLOSENESS, R_AFFECTION] = 0.10
     B[ST_CLOSENESS, R_FAMILIARITY] = 0.12
@@ -86,13 +87,16 @@ def _build_rel_input_influence() -> np.ndarray:
     B[ST_CONFLICT, R_EMOTIONAL_SAFETY] = -0.20
     B[ST_CONFLICT, R_AFFECTION] = -0.08
     B[ST_CONFLICT, R_ROMANTIC_TENSION] = -0.08
-    # dependency → dependency↑, familiarity↑, safety↑
+    # dependency → dependency↑, familiarity↑, safety↑, tension↑
     B[ST_DEPENDENCY, R_DEPENDENCY] = 0.18
     B[ST_DEPENDENCY, R_FAMILIARITY] = 0.06
     B[ST_DEPENDENCY, R_EMOTIONAL_SAFETY] = 0.05
+    B[ST_DEPENDENCY, R_ROMANTIC_TENSION] = 0.06   # 被需要→浪漫张力
     # teasing → familiarity↑, tension↑
     B[ST_TEASING, R_FAMILIARITY] = 0.08
     B[ST_TEASING, R_ROMANTIC_TENSION] = 0.08
+    # emotional_weight → tension↑
+    B[ST_EMOTIONAL_WEIGHT, R_ROMANTIC_TENSION] = 0.05   # 情感重量→暧昧
 
     return B
 

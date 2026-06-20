@@ -1,11 +1,12 @@
 """State Dynamics —— 残差式状态更新（刺激+耦合驱动，无 per-turn 稳态恢复）。
 
 核心公式:
-  h_t = h_{t-1} + Δt · (α·Δ_coupling + β·Δ_stimulus)
+  h_t = h_{t-1} + Δt · (α·Δ_coupling + Δ_stimulus_modulated)
 
-两个速率参数分别由不同的人格/关系/防御因素调制:
+两个参数 + 一个逐维度调制:
   α — 跨维度耦合速率 (traits + relationship)
-  β — 刺激接受速率    (defense profiles: hyperactivation↑, deactivation↓)
+  β — 刺激接受速率，逐刺激维度 (defense profiles: hyper↑每维, deact↓每维)
+      不再使用 hyper.mean() 全局标量，保留防御剖面的刺激特异性
 
 稳态恢复（拉到人格基线）已移除——职责转移到 _decay.py 的时间衰减。
 也就是说，每轮对话中状态完全由刺激和耦合驱动，不向 setpoint 拉。
@@ -23,6 +24,7 @@ from state import (
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
     R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
     R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    ST_SIZE,
     T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
     T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
@@ -86,9 +88,9 @@ def update_internal_state(
 ) -> np.ndarray:
     """残差式内部状态更新。
 
-    h_t = h_{t-1} + dt · (α·Δ_coupling + β·Δ_stimulus)
+    h_t = h_{t-1} + dt · (α·Δ_coupling + Δ_stimulus_modulated)
 
-    防御剖面 (profiles) 控制 β 的速率，不直接控制状态值。
+    β 已不再是全局标量——每个刺激维度有自己的接受率，融入 Δ_stimulus_modulated。
 
     Args:
         current: 当前内部状态 h_{t-1} (8,)
@@ -101,8 +103,8 @@ def update_internal_state(
     Returns:
         更新后的内部状态 h_t (8,)
     """
-    deact = profiles[0]  # 去激活
-    hyper = profiles[1]  # 过度激活
+    deact = profiles[0]  # 去激活 (7,)
+    hyper = profiles[1]  # 过度激活 (7,)
 
     # ── α: 跨维度耦合速率 ──
     # 由 traits 决定。开放→耦合快，稳定→耦合慢（更独立），信任→耦合快。
@@ -112,14 +114,16 @@ def update_internal_state(
     alpha += relationship[R_TRUST] * 0.06
     alpha = soft_clamp(alpha, 0.02, 0.35)
 
-    # ── β: 刺激接受速率 ──
-    # 由防御剖面决定。过度激活→接受快（正权重），去激活→接受慢（负权重）。
-    # 新公式（2026-06-18）：加大 hyper 权重、降低 deact 抵消力度，
-    # 使防御剖面真正影响响应速率，而不是相互抵消。
-    beta = 0.05
-    beta += hyper.mean() * 0.35
-    beta -= deact.mean() * 0.15
-    beta = soft_clamp(beta, 0.01, 0.35)
+    # ── β: 刺激接受速率（逐刺激维度）──
+    # 每个刺激维度有自己的接受率，由该维度的防御剖面调制。
+    #   hyper[ST_CLOSENESS]高 → closeness 被强烈接受
+    #   deact[ST_CONFLICT]高  → conflict 被情感压制
+    # 相比 hyper.mean() 全局标量方案，保留防御剖面在具体刺激类型上的选择性。
+    # 注意：apply_defenses 通过 inner=stimuli*(1+hyper) 做幅度放大，
+    # 这里是速率调制——两者独立，并用更合理。
+    beta_base = np.full(ST_SIZE, 0.05)
+    beta_stim = beta_base + hyper * 0.35 - deact * 0.15
+    beta_stim = np.clip(beta_stim, 0.01, 0.35)
 
     # ── Δ_coupling: 跨维度耦合 + 每维度自阻尼 ──
     # 替代旧的 A 矩阵（STATE_COUPLING_A @ h − h）:
@@ -136,20 +140,30 @@ def update_internal_state(
     coupling[I_IRRITATION] += current[I_STRESS] * 0.15           # 压力积累→易怒
     coupling[I_IRRITATION] += current[I_SOCIAL_BATTERY] * (-0.08) # 社交电量低→烦躁
     coupling[I_LONGING]    += current[I_LONELINESS] * 0.15       # 孤独→思念
+    coupling[I_SOCIAL_BATTERY] += current[I_ENERGY] * 0.08       # 精力充沛→电量恢复
     coupling[I_MENTAL_FATIGUE] += current[I_STRESS] * 0.10       # 压力→精神疲劳
     coupling[I_MENTAL_FATIGUE] += current[I_SOCIAL_BATTERY] * (-0.10) # 社交电量低→疲劳
 
-    delta_coupling = coupling - SELF_DECAY * current
+    # 自阻尼目标：每维度向谁收敛
+    # 大部分维度向 0（中性基线），social_battery 向 0.20（健康基线）
+    # setpoint 0.20 ≈ DEFAULT_INTERNAL[I_SOCIAL_BATTERY] + stability*0.05
+    # 这里用固定值 0.20 作为阻尼目标，人格化 setpoint 由 _decay.py 的时间衰减负责
+    DECAY_TARGETS = np.zeros(I_SIZE, dtype=np.float64)
+    DECAY_TARGETS[I_SOCIAL_BATTERY] = 0.20
+    delta_coupling = coupling - SELF_DECAY * (current - DECAY_TARGETS)
 
-    # ② 刺激输入
-    delta_stimulus = inner_stimuli @ INPUT_INFLUENCE_B
+    # ② 刺激输入：逐维度 β 调制 → B 矩阵映射
+    # 每个刺激先按自己的接受率缩放，再映射到内部状态。
+    # 这保留了防御剖面对具体刺激类型的选择性响应。
+    modulated_stimuli = beta_stim * inner_stimuli  # (7,), 逐元素乘
+    delta_stimulus = modulated_stimuli @ INPUT_INFLUENCE_B
 
     # ③ 稳态恢复已移除——拉到 setpoint 的职责交给 _decay.py
     #    （时间衰减，由真实时间 Δt 驱动）。
     #    每轮对话中，状态完全由刺激和耦合驱动。
 
     # ── 残差更新 ──
-    delta = alpha * delta_coupling + beta * delta_stimulus  # γ 项已移除
+    delta = alpha * delta_coupling + delta_stimulus  # β 已融入 modulated_stimuli
     return soft_clamp(current + dt * delta, -1.0, 1.0)
 
 
@@ -195,6 +209,8 @@ def update_relationship_state(
     rel_coupling[R_AFFECTION]        += current[R_EMOTIONAL_SAFETY] * 0.047204  # 安全感→好感
     rel_coupling[R_AFFECTION]        += current[R_ROMANTIC_TENSION] * 0.028322  # 暧昧→好感
     rel_coupling[R_ROMANTIC_TENSION] += current[R_DEPENDENCY] * 0.047204   # 依赖→暧昧
+    rel_coupling[R_ROMANTIC_TENSION] += current[R_AFFECTION] * 0.035       # 好感→紧张（喜欢一个人自然会紧张）
+    rel_coupling[R_ROMANTIC_TENSION] += current[R_TRUST] * 0.025          # 信任→期待（越信任越在意对方）
 
     delta_coupling = rel_coupling - REL_SELF_DECAY * current
 

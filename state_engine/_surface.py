@@ -32,12 +32,17 @@ def project_surface(
     s = np.zeros(S_SIZE, dtype=np.float64)
 
     # 内部状态基线（值域 [-1, 1]）
-    s[S_EXPRESSIVENESS] = -0.3 + internal[I_ENERGY] * 0.4 - internal[I_MENTAL_FATIGUE] * 0.3
-    s[S_WARMTH]         = -0.2 + relationship[R_AFFECTION] * 0.4 - internal[I_STRESS] * 0.2
-    s[S_SHARPNESS]      = -0.1 + internal[I_IRRITATION] * 0.5 + internal[I_STRESS] * 0.2
-    s[S_SOFTNESS]       = -0.1 - internal[I_STRESS] * 0.3 + relationship[R_EMOTIONAL_SAFETY] * 0.2
-    s[S_ENTHUSIASM]     = -0.2 + internal[I_ENERGY] * 0.5 - internal[I_MENTAL_FATIGUE] * 0.3
-    s[S_RESTRAINT]      = -0.1 + internal[I_INSECURITY] * 0.3 + traits[T_PRIDE] * 0.2
+    # stress 分散出口：只影响 warmth(-0.15)/sharpness(+0.15)/restraint(+0.20)，
+    # 不再三路叠加 warmth↓+sharpness↑+softness↓。restraint 是中性出口（克制≠负面）。
+    # softness 改为由 emotional_safety 单独主导。
+    # energy 与 fatigue 的表面对冲减弱：fatigue 系数从 0.30 降至 0.15，
+    # 避免等高对冲掩盖 energy 的正向表达。
+    s[S_EXPRESSIVENESS] = -0.3 + internal[I_ENERGY] * 0.4 - internal[I_MENTAL_FATIGUE] * 0.15
+    s[S_WARMTH]         = -0.2 + relationship[R_AFFECTION] * 0.4 - internal[I_STRESS] * 0.15
+    s[S_SHARPNESS]      = -0.1 + internal[I_IRRITATION] * 0.5 + internal[I_STRESS] * 0.15
+    s[S_SOFTNESS]       = -0.1 + relationship[R_EMOTIONAL_SAFETY] * 0.2   # stress 移除，由 emotional_safety 主导
+    s[S_ENTHUSIASM]     = -0.2 + internal[I_ENERGY] * 0.5 - internal[I_MENTAL_FATIGUE] * 0.15
+    s[S_RESTRAINT]      = -0.1 + internal[I_INSECURITY] * 0.3 + traits[T_PRIDE] * 0.2 + internal[I_STRESS] * 0.20
     s[S_VULNERABILITY]  = -0.5 + internal[I_LONELINESS] * 0.3 + internal[I_LONGING] * 0.2 - traits[T_PRIDE] * 0.2
 
     # 外表情刺激的直接影响（被压抑后的版本，stimuli 仍在 [0, 1]）
@@ -48,6 +53,7 @@ def project_surface(
     s[S_RESTRAINT]      += outer_stimuli[ST_EMOTIONAL_WEIGHT] * 0.20
     s[S_SHARPNESS]      += outer_stimuli[ST_TEASING]     * 0.10
     s[S_WARMTH]         += outer_stimuli[ST_DEPENDENCY]  * 0.10
+    s[S_ENTHUSIASM]     += outer_stimuli[ST_VALIDATION]  * 0.15  # 被认可→活力上升
 
     # 特质修饰 — 连续贡献（sigmoid 软阈值，traits 已以 0 为中心）
     pride_active = _sigmoid(traits[T_PRIDE] / 0.30)
