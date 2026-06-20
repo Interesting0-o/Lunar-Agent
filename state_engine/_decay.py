@@ -73,6 +73,12 @@ class DecayConfig:
     internal_time_curve_k: float = 0.05   # 内部: 弱放缓
     relationship_time_curve_k: float = 0.001  # 关系: 几乎不额外放缓
 
+    # ── 非对称衰减 ──
+    # 关系状态中，负向偏离（current[s] < setpoint[s]）的 λ 倍率。
+    # > 1.0 → 负面印象消退快于正面（Fading Affect Bias），关系韧性。
+    # 仅用于关系状态（内部状态不区分方向）。
+    negative_decay_boost: float = 1.8
+
     # ── 最小时间间隔 (小时) ──
     # 低于此值的间隔不触发衰减，避免每轮微小计算
     min_delta_hours: float = 0.01  # ~36 秒
@@ -214,6 +220,11 @@ def apply_time_decay_relationship(
     )
 
     deviation = current - setpoint
+
+    # 非对称衰减：负向偏离（current < setpoint，即负面印象）加速恢复
+    negative_mask = deviation < 0
+    lam[negative_mask] *= config.negative_decay_boost
+
     decay_factor = np.exp(-lam * delta_hours)
     decayed = setpoint + deviation * decay_factor
 

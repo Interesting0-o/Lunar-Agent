@@ -148,9 +148,76 @@ class TestScenarios:
             "调侃应增加熟悉度"
 
 
+class TestRepeatedSingleStimulus:
+    """单一刺激重复多轮的监督测试。"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self, default_traits, default_internal, default_relationship):
+        self.traits = default_traits
+        self.internal = default_internal
+        self.relationship = default_relationship
+
+    def _repeat(self, stim: np.ndarray, steps: int = 12):
+        current_internal = self.internal.copy()
+        current_rel = self.relationship.copy()
+        internal_hist = []
+        relationship_hist = []
+
+        for _ in range(steps):
+            result = update_all(current_internal, current_rel, self.traits, stim)
+            current_internal = result["internal_state"]
+            current_rel = result["relationship_state"]
+            internal_hist.append(current_internal.copy())
+            relationship_hist.append(current_rel.copy())
+
+        return np.stack(internal_hist), np.stack(relationship_hist)
+
+    def test_repeated_abandonment_monotonic(self):
+        s = np.zeros(ST_SIZE); s[ST_ABANDONMENT] = 0.85
+        internal_hist, rel_hist = self._repeat(s)
+
+        assert np.all(np.diff(internal_hist[:, I_INSECURITY]) >= -1e-12), \
+            "被抛弃重复刺激应持续增加不安全感"
+        assert np.all(np.diff(internal_hist[:, I_LONELINESS]) >= -1e-12), \
+            "被抛弃重复刺激应持续增加孤独感"
+        assert np.all(np.diff(internal_hist[:, I_STRESS]) >= -1e-12), \
+            "被抛弃重复刺激应持续增加压力"
+        assert np.all(np.diff(rel_hist[:, R_EMOTIONAL_SAFETY]) <= 1e-12), \
+            "被抛弃重复刺激应持续降低情感安全"
+
+    def test_repeated_validation_monotonic(self):
+        s = np.zeros(ST_SIZE); s[ST_VALIDATION] = 0.85
+        internal_hist, rel_hist = self._repeat(s)
+
+        assert np.all(np.diff(internal_hist[:, I_INSECURITY]) <= 1e-12), \
+            "被认可重复刺激应持续减少不安全感"
+        assert np.all(np.diff(rel_hist[:, R_AFFECTION]) >= -1e-12), \
+            "被认可重复刺激应持续增加好感"
+
+    def test_repeated_closeness_monotonic(self):
+        s = np.zeros(ST_SIZE); s[ST_CLOSENESS] = 0.85
+        internal_hist, rel_hist = self._repeat(s)
+
+        assert np.all(np.diff(internal_hist[:, I_LONELINESS]) <= 1e-12), \
+            "亲密重复刺激应持续减少孤独感"
+        assert np.all(np.diff(rel_hist[:, R_FAMILIARITY]) >= -1e-12), \
+            "亲密重复刺激应持续增加熟悉度"
+        assert np.all(np.diff(rel_hist[:, R_EMOTIONAL_SAFETY]) >= -1e-12), \
+            "亲密重复刺激应持续增加情感安全"
+
+    def test_repeated_teasing_monotonic(self):
+        s = np.zeros(ST_SIZE); s[ST_TEASING] = 0.85
+        internal_hist, rel_hist = self._repeat(s)
+
+        assert np.all(np.diff(rel_hist[:, R_FAMILIARITY]) >= -1e-12), \
+            "调侃重复刺激应持续增加熟悉度"
+        assert np.all(np.diff(rel_hist[:, R_ROMANTIC_TENSION]) >= -1e-12), \
+            "调侃重复刺激应持续增加浪漫张力"
+
+
 # ═══════════════════════════════════════════════════════════════
 # 多轮累积测试
-# ═══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════
 
 class TestMultiRound:
     """多轮对话的累积效应。"""

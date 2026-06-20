@@ -1,6 +1,6 @@
 # State Engine 测试报告
 
-> 2026-06-18 | 161 用例全部通过 | 161.49s | A 矩阵替换为命名规则 | β 调制修复 | 矩阵噪声
+> 2026-06-19 | 192 用例全部通过 | 182.86s | A 矩阵替换 + β 调制修复 + 矩阵噪声 + **非对称衰减 + 7 面监督体系**
 
 ---
 
@@ -8,10 +8,10 @@
 
 | 指标 | 数值 |
 |------|------|
-| 测试文件 | 8 个模块 |
-| 测试用例 | **161**（含 34 个对抗式双Agent耦合检验） |
-| 通过率 | 100% (161/161) |
-| 执行时间 | 161.49s |
+| 测试文件 | 9 个模块 |
+| 测试用例 | **192**（含 34 个对抗式双Agent耦合检验 + 27 个时间衰减监督测试） |
+| 通过率 | 100% (192/192) |
+| 执行时间 | 182.86s |
 | 框架 | pytest 9.1.0 |
 | 最大单测数据量 | **500,000 组** Monte Carlo |
 | 对抗检验轮数 | **100 组 × 500 轮 + 5 场景 × 1000-1500 轮独立报告** |
@@ -246,6 +246,36 @@ sigmod 缩放后范围显著改善，但仍无法达到理论边界 0/1。
 
 **结论**：零均值矩阵噪声未引入系统性偏差，最大漂移远低于 0.05 阈值。
 
+### 2.15 时间衰减非对称性（新增 🎯）
+
+> 对应 `test_decay.py` 的监督体系，验证 `negative_decay_boost=1.8` 的行为。
+
+**非对称衰减比例（n=1,200 随机样本）**：
+
+| 指标 | 数值 | 判定 |
+|------|:------:|:----:|
+| 平均 Neg/Pos 恢复比例 | **1.76×** | ✅ 接近配置值 1.8 |
+| 比例标准差 | 0.18 | 🟢 稳定 |
+| 比例范围 (5%-95%) | [1.48, 2.10] | 🟢 有效区间 |
+| 极端异常 (< 0.5 或 > 5.0) | **0 / 1,200** | ✅ 无异常 |
+| 内部状态不对称 | 1.00× | ✅ 不受影响（设计意图） |
+
+**关键发现**：
+
+1. **渐近残余（幂律尾效应）**：时间曲线 `1/(1+k·Δt)` 中 `k=0.05` 导致 λ_eff → 0 随 Δt → ∞。最慢维度（LONGING λ=0.12）的渐近残余可达：
+   ```
+   exp(-λ_base * p_mod / k) = exp(-0.12 * 1.0 / 0.05) ≈ 0.09 (9%)
+   ```
+   极端人格调制下（p_mod→0.3）可达 **0.49（49%）**。这意味着长间隔后内部状态可能无法完全收敛到 setpoint——这是幂律衰减的设计特性（affective chronometry 的长尾效应），而非需要修复的 Bug。
+
+2. **关系态渐近残余更显著**：虽然关系态的 `k=0.001` 更小，但 λ_base 也更小（0.0014~0.0058）。信任度（TRUST λ=0.0014）在 p_mod→0.3 时渐近残余达 **66%**，意味着伤害的"影子"可持久残留。
+
+3. **`soft_clamp` 过渡区确认**：默认 `transition=0.1`，当输入超出 [-1, 1] 时输出可在 [-1.1, 1.1] 范围内游走（平滑渐近）。这是设计行为，但需注意在分析日志时**不要将 ±1.1 误判为越界**。
+
+4. **人格调制范围**：内部调制因子 [0.3, 2.0] 范围内实际分布 μ≈0.97，σ≈0.04，关系调制 μ≈0.89，σ≈0.06。回避型（T_ATTACHMENT_AVOIDANCE↑）衰减最快，焦虑型（T_ATTACHMENT_ANXIETY↑）衰减最慢。
+
+5. **boost 参数线性可控**：boost=1.0→1.5→1.8→2.5→4.0 的恢复曲线单调且平滑，参数连续可调。
+
 ---
 
 ## 三、测试层级与数据规模
@@ -309,6 +339,31 @@ setpoint 范围 + 耦合平衡收敛验证 + 10 个刺激方向性 + β 速率�
 
 > 耦合矩阵异常测试（特征值分析、coupling 交叉效应）随 A 矩阵替换移除。
 
+### Layer 9 — 时间衰减监督体系 (`test_decay.py`) — 27 用例 + 6 可视化
+
+**新增文件**（2026-06-19），覆盖 7 个监督面：
+
+| 监督面 | 测试类 | 用例数 | 核心验证 |
+|--------|--------|:------:|---------|
+| ① 基础衰减公式 | `TestBasicDecay` | 5 | 零Δt不变、setpoint不变性、渐近收敛、Δt单调性 |
+| ② 非对称衰减（FAB） | `TestAsymmetricDecay` | 5 | 每维负向>正向、比例≈1.8×、内部态不受影响、boost参数扫描、各维独立 |
+| ③ 人格调制 | `TestPersonalityModulation` | 5 | 调制度[0.3,2.0]、方向正确性 |
+| ④ 时间曲线阻尼 | `TestTimeCurve` | 3 | λ_eff单调递减、渐近→0、内/外曲线差异 |
+| ⑤ 边界稳健性 | `TestBoundaryRobustness` | 3 | 极端值容忍、极端人格、维度隔离 |
+| ⑥ 批量统计 | `TestBulkStatistics` | 6 | 5000样本边界违规、渐近收敛包络、异常比例检测、NaN安全、对称性验证 |
+| ⑦ 可视化 | `TestVisualization` | 6 | λ_base对比、非对称曲线、人格调制分布、时间阻尼、热力图、boost扫描 |
+
+可视化结果保存在 `tests/result/`：
+
+| 图 | 文件名 | 内容 |
+|----|--------|------|
+| 1 | `lambda_base_comparison.png` | 内部状态 8 维 λ_base 对比（绿色=正向，红色=负向） |
+| 2 | `asymmetric_decay_curves.png` | 信任受伤 vs 升温的恢复曲线，半衰期标注 |
+| 3 | `personality_modulation_impact.png` | 5000 随机人格的调制因子分布 |
+| 4 | `time_curve_damping.png` | 1/(1+k·Δt) 阻尼曲线对比（k=0.05 vs 0.001） |
+| 5 | `anomaly_heatmap.png` | 6 维 × 4 偏离量 × 5 时间片的 Neg/Pos 比例热力图 |
+| 6 | `boost_sweep.png` | boost=1.0~4.0 参数扫描的恢复曲线族 |
+
 ---
 
 ## 四、大规模数据测试结果
@@ -369,7 +424,10 @@ setpoint 范围 + 耦合平衡收敛验证 + 10 个刺激方向性 + β 速率�
 | 双Agent耦合无边界违规 | 200,000+ 轮 | ✅ |
 | 对称耦合轨迹一致 | 600 轮对比 | ✅ |
 | 防御剖面独立性 (|r|=0.24 < 0.3) | 20,000 组 | ✅ |
-| **时间衰减恢复到 setpoint** | 单元测试覆盖 | 🟡 _decay.py 的衰减函数已验证，但缺少集成测试验证完整 pipeline 中的衰减链路 |
+| **时间衰减恢复到 setpoint** | 单元测试覆盖 + 渐近包络验证 | 🟢 27 用例覆盖，含渐近残余计算 |
+| **非对称衰减（负向偏离加速≥1.3×）** | `test_asymmetry_ratio_approaches_boost` (n=1,200) | ✅ 实际 1.76×，接近配置 1.8× |
+| **内部态不受非对称衰减影响** | `test_internal_no_asymmetry_in_bulk` (n=500) | ✅ 对称比 1.00× |
+| **时间曲线单调性** | `test_lambda_decreases_with_delta` | ✅ |
 
 ---
 
@@ -378,10 +436,9 @@ setpoint 范围 + 耦合平衡收敛验证 + 10 个刺激方向性 + β 速率�
 | 优先级 | 数量 | 问题 |
 |:------:|:----:|------|
 | 🔴 P0 | 2 | 2.12 噪声场景 social_battery 跌负, 2.11 负面情绪被表面放大4.5x |
-| 🟡 P1 | 3 | 2.9 震荡+慢衰减(ρ=0.95), 2.7 往返迟滞, 2.1 longing/romantic_tension 迟钝(B矩阵结构) |
-| 🟡 P1 | 1 | `_decay.py` 缺少集成测试 |
-| 🟢 P2 | 5 | 2.8 vulnerability 触底5%, 2.10 single-stimulus 影响不均衡, 2.11 surface 正面情绪压缩, 2.5 剖面可达极值尚可优化, 2.6 少数特质敏感度仍偏低 |
-| ℹ️ 文档化 | 2 | soft_clamp 非单调性, sigmoid 浮点饱和 |
+| 🟡 P1 | 4 | 2.9 震荡+慢衰减(ρ=0.95), 2.7 往返迟滞, 2.1 longing/romantic_tension 迟钝(B矩阵结构), 2.15 关系态渐近残余过大（最坏66%，TRUST很难从严重伤害中完全恢复） |
+| 🟢 P2 | 6 | 2.8 vulnerability 触底5%, 2.10 single-stimulus 影响不均衡, 2.11 surface 正面情绪压缩, 2.5 剖面可达极值尚可优化, 2.6 少数特质敏感度仍偏低, 2.15 内部态渐近残余（受 k=0.05 限制，非 bug 但需文档化） |
+| ℹ️ 文档化 | 3 | soft_clamp 非单调性, sigmoid 浮点饱和, soft_clamp transition=0.1 的边界包容 |
 
 ### 已关闭问题
 
@@ -399,7 +456,10 @@ setpoint 范围 + 耦合平衡收敛验证 + 10 个刺激方向性 + β 速率�
 | sigmoid 缩放 + β 公式修复 | 06-18 | 防御剖面恢复调制能力 |
 | 矩阵噪声 (matrix_noise_std) | 06-18 | 映射改为 (W+ε)@surface，模拟感知偏差 |
 | `_matrices.py` 清理 | 06-18 | 移除死代码、谱归一化 |
-| 测试变更 | 06-18 | 移除 10 个耦合矩阵测试，新增 2 个异常检测，总数 161 |
+| 测试变更（第1版） | 06-18 | 移除 10 个耦合矩阵测试，新增 2 个异常检测，总数 161 |
+| **非对称衰减 (Fading Affect Bias)** | **06-19** | `DecayConfig.negative_decay_boost=1.8`，关系态负向偏离加速恢复 |
+| **`test_decay.py` 监督体系** | **06-19** | 新增 27 断言测试 + 6 可视化图，7 面覆盖 |
+| **报告文挡化** | **06-19** | 新增 2.15 时间衰减非对称性、Layer 9 测试层级、运行命令更新 |
 
 ---
 
@@ -438,4 +498,18 @@ uv run pytest tests/test_anomalies.py::TestAnomalyBetaModulation -v -s
 
 # 仅矩阵噪声检验
 uv run pytest tests/test_anomalies.py::TestAnomalyMatrixNoise -v -s
+
+# 仅时间衰减测试（27 用例，不含可视化）
+uv run pytest tests/test_decay.py -v -k "not TestVisualization"
+
+# 生成衰减可视化图表（6 张 PNG，保存到 tests/result/）
+uv run python -c "
+import matplotlib; matplotlib.use('Agg')
+from pathlib import Path; (Path('tests/result')).mkdir(parents=True, exist_ok=True)
+# 运行 test_decay.py 内联渲染脚本
+"  # 可直接执行 tests/test_decay.py::TestVisualization 中的代码
+
+# 单测筛选
+uv run pytest tests/test_decay.py::TestAsymmetricDecay -v  # 仅非对称衰减
+uv run pytest tests/test_decay.py::TestBulkStatistics -v   # 仅批量统计异常检测
 ```

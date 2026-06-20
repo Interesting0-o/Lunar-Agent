@@ -1,6 +1,9 @@
 # 时间感知衰减组件设计
 
 > 基于情感动力学和人际关系时间衰减的学术研究。
+>
+> **实现状态**：✅ 全部已实现（见 `_decay.py`）。`negative_decay_boost=1.8` 非对称衰减于 06-19 新增。
+> 详情见测试报告可视化和 `tests/result/`。
 
 ---
 
@@ -205,18 +208,19 @@ result["last_active_timestamp"] = current_ts
 
 ---
 
-## 5. 初期衰减曲线可视化
+## 5. 衰减曲线可视化
 
-```
-Δt = 0h:    状态 = 当前值 (100%)
-Δt = 1h:    烦躁恢复约 50%，思念几乎不变
-Δt = 3h:    压力恢复约 50%，不安全感恢复约 34%
-Δt = 8h:    大多数内部情绪恢复 60-90%
-Δt = 24h:   所有内部情绪接近 baseline (>95% 恢复)
-Δt = 7d:    familiarity 恢复约 50%
-Δt = 14d:   affection 恢复约 50%
-Δt = 30d:   所有关系维度接近 baseline
-```
+实际衰减曲线已由测试套件生成，保存在 `tests/result/`：
+
+| 图 | 文件 | 内容 |
+|----|------|------|
+| λ_base 对比 | `lambda_base_comparison.png` | 内部状态 8 维 λ_base 对比 |
+| 非对称衰减 | `asymmetric_decay_curves.png` | 信任 vs 升温恢复曲线，半衰期标注 |
+| 人格调制分布 | `personality_modulation_impact.png` | 5000 随机人格的调制因子分布 |
+| 时间曲线阻尼 | `time_curve_damping.png` | 1/(1+k·Δt) 阻尼曲线 |
+| Boost 参数扫描 | `boost_sweep.png` | boost=1.0~4.0 恢复曲线族 |
+
+运行：`uv run pytest tests/test_decay.py::TestVisualization -v -s`
 
 ---
 
