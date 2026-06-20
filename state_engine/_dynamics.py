@@ -184,12 +184,14 @@ def update_relationship_state(
     inner_stimuli: np.ndarray,
     traits: np.ndarray,
     dt: float = 1.0,
+    current_internal: np.ndarray | None = None,
 ) -> np.ndarray:
     """残差式关系状态更新（时间常数比内部状态慢 5-10 倍）。
 
     与 update_internal_state 同构，但:
       - α_rel 更小（关系变化极慢）
       - β_rel 更小（刺激对关系的影响有缓冲）
+      - 可选的 current_internal 参数提供跨尺度耦合（内→关）
     """
     # ── α_rel: 关系跨维度耦合速率 ──
     alpha = 0.045
@@ -231,6 +233,15 @@ def update_relationship_state(
     rel_coupling[R_ROMANTIC_TENSION] += current[R_DEPENDENCY] * 0.047204   # 依赖→暧昧
     rel_coupling[R_ROMANTIC_TENSION] += current[R_AFFECTION] * 0.035       # 好感→紧张（喜欢一个人自然会紧张）
     rel_coupling[R_ROMANTIC_TENSION] += current[R_TRUST] * 0.025          # 信任→期待（越信任越在意对方）
+
+    # ── 跨尺度耦合（内→关）──
+    # 内部状态以弱系数（0.015-0.03）调制关系状态，匹配关系态慢时间常数。
+    if current_internal is not None:
+        rel_coupling[R_TRUST]            += current_internal[I_STRESS] * (-0.02)    # 压力→信任↓
+        rel_coupling[R_EMOTIONAL_SAFETY]  += current_internal[I_STRESS] * (-0.03)   # 压力→安全感↓
+        rel_coupling[R_ROMANTIC_TENSION]  += current_internal[I_LONELINESS] * 0.02  # 孤独→张力↑
+        rel_coupling[R_AFFECTION]         += current_internal[I_ENERGY] * 0.015     # 精力→好感↑
+        rel_coupling[R_DEPENDENCY]        += current_internal[I_INSECURITY] * 0.02  # 不安→依赖↑
 
     delta_coupling = rel_coupling - REL_SELF_DECAY * current
 

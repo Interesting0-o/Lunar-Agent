@@ -76,6 +76,7 @@ def update_all(
     )
     new_relationship = update_relationship_state(
         current_relationship, inner_stimuli, traits,
+        current_internal=new_internal,
     )
 
     # ③ 表面投影
