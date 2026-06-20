@@ -127,8 +127,26 @@ def update_internal_state(
 
     # ── Δ_coupling: 跨维度耦合 + 每维度自阻尼 ──
     # 替代旧的 A 矩阵（STATE_COUPLING_A @ h − h）:
-    # 自阻尼系数对应原 A 矩阵对角线 0.85 → 每轮向 0 回归 15%
-    SELF_DECAY = np.full(I_SIZE, 0.15)
+    # SELF_DECAY 是每维度独立的自阻尼率，控制各维度向 DECAY_TARGETS 收敛的速度。
+    #   - 正值 setpoint 维度（energy, social_battery）阻尼更小，避免隐性"税"
+    #   - 负值 setpoint 维度恢复越快阻尼越大（irritation 0.20, fatigue 0.18）
+    #   - 耦合效应本身负责状态间传导，SELF_DECAY 防止耦合失控
+    SELF_DECAY = np.array([
+        0.10,  # I_ENERGY         — setpoint+0.399, 降税；正向慢衰减
+        0.12,  # I_STRESS         — setpoint-0.560, 降税；减少向上回拉
+        0.12,  # I_LONELINESS     — setpoint-0.395, 降税
+        0.12,  # I_INSECURITY     — setpoint-0.460, 降税
+        0.12,  # I_IRRITATION     — setpoint-0.800, 降税；易怒情绪持续稍长
+        0.12,  # I_LONGING        — setpoint-0.185, 降税
+        0.10,  # I_SOCIAL_BATTERY — setpoint+0.200, DECAY_TARGETS 补正
+        0.12,  # I_MENTAL_FATIGUE — setpoint-0.710, 降税
+    ])
+
+    # 自阻尼目标：每维度向谁收敛，而非固定向 0。
+    # social_battery 向 0.20（健康基线 ≈ DEFAULT_INTERNAL 中值 + 稳定性增益），
+    # 其余维度向 0（中性基线，人格化 setpoint 由 _decay.py 时间衰减负责）。
+    DECAY_TARGETS = np.zeros(I_SIZE, dtype=np.float64)
+    DECAY_TARGETS[I_SOCIAL_BATTERY] = 0.20
 
     # 跨维度耦合：显式命名规则，每条附心理学依据
     coupling = np.zeros(I_SIZE, dtype=np.float64)
@@ -144,12 +162,6 @@ def update_internal_state(
     coupling[I_MENTAL_FATIGUE] += current[I_STRESS] * 0.10       # 压力→精神疲劳
     coupling[I_MENTAL_FATIGUE] += current[I_SOCIAL_BATTERY] * (-0.10) # 社交电量低→疲劳
 
-    # 自阻尼目标：每维度向谁收敛
-    # 大部分维度向 0（中性基线），social_battery 向 0.20（健康基线）
-    # setpoint 0.20 ≈ DEFAULT_INTERNAL[I_SOCIAL_BATTERY] + stability*0.05
-    # 这里用固定值 0.20 作为阻尼目标，人格化 setpoint 由 _decay.py 的时间衰减负责
-    DECAY_TARGETS = np.zeros(I_SIZE, dtype=np.float64)
-    DECAY_TARGETS[I_SOCIAL_BATTERY] = 0.20
     delta_coupling = coupling - SELF_DECAY * (current - DECAY_TARGETS)
 
     # ② 刺激输入：逐维度 β 调制 → B 矩阵映射
