@@ -2,6 +2,7 @@
 
 > Lunar 项目待办事项与已知问题清单。
 > 对抗检验报告见 `md/STATE_ENGINE_TEST_REPORT.md`，soft_clamp 分析见 memory。
+> 双速 SSM 框架设计见 `md/DUAL_TIMESCALE_SSM.md`，有效自由度分析见下方。
 
 ---
 
@@ -18,19 +19,25 @@
 - [x] **表面投影软阈值化**：硬阈值分支改为 sigmoid 连续贡献
 - [x] **时间感知衰减组件**：新建 `_decay.py`，以真实时间戳 + 指数衰减 + 人格调制驱动离线状态恢复
 - [x] **死代码清理**：移除旧 `_decay.py`、`PERSONALITY_BIAS_C`、`validate_matrices`、decay 常量
-- [x] **对抗式双Agent耦合检验**：新建 `tests/test_adversarial_engine.py`（34 用例，185 全通过）
-- [x] **大规模异常扫描**：200 组 × 1000 轮 = 20 万轮双Agent耦合，报告写入 `md/STATE_ENGINE_TEST_REPORT.md`
+- [x] **浪漫张力近乎冻结修复**：B 矩阵加 3 条入边（validation/dependency/emotional_weight→tension）+ 耦合 2 条入边（affection/trust→tension），单轮响应 0.0084→0.0124（+48%）
+- [x] **SELF_DECAY 隐性税修复**：统一 0.15→每维度独立数组（0.10-0.12），tax 总值 internal↓22%、relationship↓28%
+- [x] **跨尺度耦合缺失修复**：`update_relationship_state` 新增 `current_internal` 参数，5 条内→关耦合规则（stress→trust/safety、loneliness→tension、energy→affection、insecurity→dependency）
+- [x] **β 逐维度解耦**：`hyper.mean()` 全局标量→`(7,)` 逐刺激维度向量，保留防御剖面在具体刺激类型上的选择性
+- [x] **social_battery 结构性修复**：B 矩阵增 validation→+0.15、closeness→-0.10→+0.08；新增 energy→social_battery 耦合；DECAY_TARGETS[I_SOCIAL_BATTERY]=0.20
+- [x] **表面层 stress 去放大**：stress 从 warmth/sharpness/restraint 分散出口，解除 4.5×放大；fatigue 系数 0.30→0.15
 
 ---
 
 ## P0 — 阻塞性
 
+- [ ] **状态空间维度严重冗余** 🔴：PCA 分析显示 14 维状态空间有效自由度仅 6 维（95% 方差），8 维贡献 < 1% 方差。
+  - **数据**：irritation×mental_fatigue r=+0.997，familiarity×romantic_tension r=+0.997，familiarity×dependency r=+0.986，前 2 个主成分解释 73% 方差
+  - **根因**：耦合矩阵过密，维度间全协同无拮抗；关系维度 6 维全部正相关同步运动；pride 锁死在 Traits 不是动态状态
+  - **影响**：心理表达力 ≈ 6 维而非 14 维；关系维度实际只编码 2-3 件事；longing/insecurity 独立方差 < 10%
+  - **方向**：见 `md/DUAL_TIMESCALE_SSM.md` 双速分解（PAD 正交基底 + 慢速依恋关系）或稀疏化耦合
 - [ ] State Formatter 重写：当前 `_desc()` 将连续状态离散化为 5 级文本描述，破坏 State Engine 连续性。
 - [x] 时间驱动衰减：~~引入真实时间戳机制~~ ✅ 已完成。
 - [ ] **硬编码参数过多**：State Engine 总计 ~190 个手工数值，详见下方「P1 → 参数管理」。
-- [ ] **loneliness / social_battery 稳态崩溃** 🔴：耦合矩阵对角惯性 0.85 + α/γ=3.2x → 真实稳态 ≠ setpoint。loneliness 在 93% 试验中偏离>0.2（全部偏低），social_battery 在 92% 试验中偏离>0.2（全部偏低）。根因：这两个维度在 STATE_COUPLING_A 中无跨维度入边。需提高 γ 或增加耦合入边。
-- [ ] **noisy_perception 确定性崩溃** 🔴：tanh 非线性 + DEFAULT_TRAITS + 噪声 → social_battery 从 0.60 跌至 0.08。Top 10 最严重案例中 9/10 为此场景。需在 tanh 模式下增加均值校正或归一化。
-- [ ] **α 永远碾压 β** 🔴：α/β 比率恒 ≥ 1.51（均值 2.79×），对话影响被结构性压制。需提高 β_base（0.10→0.15）或降低 α 基线。
 
 ## P1 — 重要
 
@@ -84,11 +91,10 @@ State Engine 共有约 **190 个硬编码数值参数**，分布在 5 个模块:
 - [ ] 特质演化：让 `traits` 随长程互动缓慢更新。
 - [ ] 刺激维度扩展：增加 `anticipation`、`guilt`、`disappointment`、`gratitude` 等。
 - [ ] FastAPI 服务化：完善 `main.py`，支持会话管理、多用户隔离。
-- [ ] G_LEAKAGE 清理：`GateVector` 与实际门控维度保持一致。
-- [ ] test.json 更新：移除已废弃的字段。
-- [ ] REL_STATE_COUPLING_A 谱半径：原始 ρ=1.0063 > 0.95，触发归一化。
-- [ ] longing / romantic_tension 响应过弱：单轮最大变化仅 0.019 / 0.005。
+- [x] G_LEAKAGE 清理：已移除。
+- [x] REL_STATE_COUPLING_A 谱半径：已替换为命名耦合规则 + SELF_DECAY。
+- [x] longing / romantic_tension 响应过弱：已修复（浪漫张力 0.0084→0.0124，longing 0.0206→0.0353）
 
 ---
 
-*最后更新：2026-06-17*
+*最后更新：2026-06-20*

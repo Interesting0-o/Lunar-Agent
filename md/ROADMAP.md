@@ -1,6 +1,6 @@
 # Lunar 待办与路线图
 
-> 2026-06-19 | 合并自 TODO_LUNAR_STATE_ENGINE.md + STATE_ENGINE_RESEARCH_REPORT.md（前瞻路线图）
+> 2026-06-20 | 新增问题 5（维度冗余/表达力不足）
 >
 > 已完成的架构修复（LSTM 三门控 → 残差动力学、decay>1 → 时间衰减、A 矩阵 → 命名规则、β 调制修复）不再列于此。
 
@@ -32,6 +32,15 @@
 
 - 角色完全被动响应，没有任何"想做某事"的内部驱动
 - 学术参考：BDI 模型、Schema Theory、Goal-Directed Behavior、SDT（autonomy/competence/relatedness）
+- **状态**：待方案
+
+### 🔴 问题 5：状态空间维度严重冗余，表达力不足
+
+- **PCA 实证**：14 维状态空间有效自由度仅 6 维（95% 方差），前 2 个主成分解释 73% 方差
+- **最大冗余**：familiarity×romantic_tension r=+0.997，irritation×mental_fatigue r=+0.997，familiarity×dependency r=+0.986
+- **根因**：耦合矩阵过密导致维度全协同无拮抗；关系维度 6 维全部正相关同步运动；pride 锁死在 Traits 不是动态状态
+- **影响**：心理表达力 ≈ 6 维而非 14 维；longing/insecurity 独立方差 < 10%
+- **方向**：`md/DUAL_TIMESCALE_SSM.md` 双速分解（PAD 正交基底 + 慢速依恋关系），或稀疏化耦合、引入拮抗对
 - **状态**：待方案
 
 ---
