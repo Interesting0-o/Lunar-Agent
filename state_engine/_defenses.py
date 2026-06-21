@@ -38,13 +38,11 @@ from state import (
     T_ANGER_REACTIVITY, T_JEALOUSY_SENSITIVITY,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     I_STRESS, I_INSECURITY, I_LONGING,
-    R_AFFECTION, R_TRUST,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
 )
 from ._utils import soft_clamp, _sigmoid
-
 
 # ═══════════════════════════════════════════════════════════════════
 # 每维调制权重
@@ -130,26 +128,14 @@ INSECURITY_DEACT_A: np.ndarray = np.array([
 
 # 信任: 信任让你在哪方面放下伪装
 #   原值: -0.11（全局）
-TRUST_DEACT_M: np.ndarray = np.array([
-    -0.14,  # ST_ABANDONMENT     — 信任→敢于暴露被抛弃恐惧
-    -0.16,  # ST_VALIDATION      — 信任→敢于说"我需要你认可"
+TRUST_BOND_DEACT_M: np.ndarray = np.array([
+    -0.16,  # ST_ABANDONMENT     — 信任→敢于暴露被抛弃恐惧
+    -0.15,  # ST_VALIDATION      — 信任→敢于说"我需要认可"
     -0.08,  # ST_CLOSENESS       — 信任→敢于靠近
     -0.10,  # ST_CONFLICT        — 信任→敢于争吵
     -0.12,  # ST_DEPENDENCY      — 信任→敢于示弱
-    -0.03,  # ST_TEASING         — 少量效果
+    -0.03,  # ST_TEASING         — 少量
     -0.14,  # ST_EMOTIONAL_WEIGHT — 信任→敢于谈沉重话题
-])
-
-# 情感安全感: 安全感在哪方面让你最放松
-#   原值: -0.09（全局）
-SAFETY_DEACT_M: np.ndarray = np.array([
-    -0.12,  # ST_ABANDONMENT     — 安全→不怕被抛弃
-    -0.10,  # ST_VALIDATION      — 安全→不需要刻意寻求认可
-    -0.10,  # ST_CLOSENESS       — 安全→敢于亲近
-    -0.06,  # ST_CONFLICT        — 安全→也敢面对冲突
-    -0.10,  # ST_DEPENDENCY      — 安全→敢于依赖
-    -0.04,  # ST_TEASING         — 少量效果
-    -0.10,  # ST_EMOTIONAL_WEIGHT — 安全→敢于承受情感重量
 ])
 
 # ────── HYPERACTIVATION 加法调制（人格特质） ──────
@@ -210,28 +196,27 @@ LONGING_HYPER_A: np.ndarray = np.array([
 
 # 好感: 喜欢上对方后，哪些刺激更容易触动内心
 #   原值: +0.09（全局）
-AFFECTION_HYPER_M: np.ndarray = np.array([
-    0.12,   # ST_ABANDONMENT     — 好感→更怕被抛弃
-    0.06,   # ST_VALIDATION      — 好感→更在意对方的认可
-    0.14,   # ST_CLOSENESS       — 核心: 好感→更渴望亲近
-    0.03,   # ST_CONFLICT        — 好感→冲突更受伤
-    0.10,   # ST_DEPENDENCY      — 好感→更想依赖
-    0.05,   # ST_TEASING         — 好感→调侃有了暧昧感
-    0.10,   # ST_EMOTIONAL_WEIGHT — 好感→情感更沉重
+AFFECTION_HYPER_M_NEW: np.ndarray = np.array([
+    0.10,   # ST_ABANDONMENT     — 好感→怕被抛弃
+    0.06,   # ST_VALIDATION      — 好感→在意认可
+    0.12,   # ST_CLOSENESS       — 好感→渴望亲近
+    0.03,   # ST_CONFLICT        — 少量
+    0.08,   # ST_DEPENDENCY      — 好感→想依赖
+    0.05,   # ST_TEASING         — 好感→调侃有温度
+    0.08,   # ST_EMOTIONAL_WEIGHT — 好感→情感加重
 ])
 
 # 浪漫张力: 暧昧气氛放大了哪类刺激
 #   原值: +0.05（全局）
-TENSION_HYPER_M: np.ndarray = np.array([
-    0.06,   # ST_ABANDONMENT     — 张力→更在意是否被放弃
-    0.03,   # ST_VALIDATION
-    0.10,   # ST_CLOSENESS       — 核心: 张力→亲密信号被放大
-    0.01,   # ST_CONFLICT
-    0.05,   # ST_DEPENDENCY      — 张力→依赖带暧昧色彩
-    0.09,   # ST_TEASING         — 核心: 张力→调侃变为调情
-    0.08,   # ST_EMOTIONAL_WEIGHT — 张力→情感重量更加缠绵
+INTIMACY_HYPER_M: np.ndarray = np.array([
+    0.12,   # ST_ABANDONMENT     — 亲密→更怕被抛弃
+    0.05,   # ST_VALIDATION      — 亲密→更在意认可
+    0.14,   # ST_CLOSENESS       — 亲密→更渴望靠近
+    0.02,   # ST_CONFLICT        — 少量
+    0.12,   # ST_DEPENDENCY      — 亲密→更想依赖
+    0.08,   # ST_TEASING         — 亲密→调侃变调情
+    0.10,   # ST_EMOTIONAL_WEIGHT — 亲密→情感更沉重
 ])
-
 
 def _apply_additive(
     vector: np.ndarray,
@@ -241,7 +226,6 @@ def _apply_additive(
 ) -> None:
     """将调制值按逐维权重加入向量。原地操作。"""
     vector += mod_value * weights
-
 
 def _apply_multiplicative(
     vector: np.ndarray,
@@ -255,7 +239,6 @@ def _apply_multiplicative(
     """
     vector *= 1.0 + mod_value * weights
 
-
 def compute_defense_profiles(
     traits: np.ndarray,
     relationship: np.ndarray,
@@ -266,7 +249,7 @@ def compute_defense_profiles(
     Parameters
     ----------
     traits: (10,)  人格特质
-    relationship: (6,)  关系状态
+    relationship: (3,)  关系状态
     internal: (8,)  内部状态
 
     Returns
@@ -325,8 +308,7 @@ def compute_defense_profiles(
 
     # ── 第三步: 关系状态调制（刺激特异性乘法） ──
     # 替换旧版全局 *= (1.0 - trust*0.11 - safety*0.09)
-    _apply_multiplicative(deact, relationship[R_TRUST],            TRUST_DEACT_M,  "trust→deact")
-    _apply_multiplicative(deact, relationship[R_EMOTIONAL_SAFETY], SAFETY_DEACT_M, "safety→deact")
+    _apply_multiplicative(deact, relationship[R_TRUST_BOND], TRUST_BOND_DEACT_M, "trust_bond->deact")
 
     # ── 第四步: 急性状态调制（刺激特异性加法） ──
     # 替换旧版全局 += stress*0.05 + insecurity*0.04
@@ -371,8 +353,8 @@ def compute_defense_profiles(
 
     # ── 第三步: 关系状态调制（刺激特异性乘法） ──
     # 替换旧版全局 *= (1.0 + affection*0.09 + tension*0.05)
-    _apply_multiplicative(hyper, relationship[R_AFFECTION],        AFFECTION_HYPER_M,  "affection→hyper")
-    _apply_multiplicative(hyper, relationship[R_ROMANTIC_TENSION], TENSION_HYPER_M,    "tension→hyper")
+    _apply_multiplicative(hyper, relationship[R_AFFECTION], AFFECTION_HYPER_M_NEW, "affection->hyper")
+    _apply_multiplicative(hyper, relationship[R_INTIMACY],  INTIMACY_HYPER_M,      "intimacy->hyper")
 
     # ── 第四步: 急性状态调制（刺激特异性加法） ──
     # 替换旧版全局 += insecurity*0.06 + longing*0.04
@@ -382,7 +364,6 @@ def compute_defense_profiles(
     profiles[1] = _sigmoid((hyper - 0.38) * 5.0)
 
     return soft_clamp(profiles, 0.0, 1.0)
-
 
 def apply_defenses(
     stimuli: np.ndarray,

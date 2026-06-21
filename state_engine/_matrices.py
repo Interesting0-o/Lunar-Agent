@@ -9,8 +9,6 @@ import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
 )
@@ -57,48 +55,3 @@ def _build_input_influence() -> np.ndarray:
 
 
 INPUT_INFLUENCE_B = _build_input_influence()
-
-
-# ═══════════════════════════════════════════════════════════════
-# Relationship 输入影响矩阵
-# ═══════════════════════════════════════════════════════════════
-
-
-def _build_rel_input_influence() -> np.ndarray:
-    """关系输入影响矩阵 B_rel（ST_SIZE × R_SIZE）。"""
-    B = np.zeros((ST_SIZE, R_SIZE), dtype=np.float64)
-
-    # abandoned → trust↓, safety↓, tension↑, dependency↑
-    B[ST_ABANDONMENT, R_TRUST] = -0.08
-    B[ST_ABANDONMENT, R_EMOTIONAL_SAFETY] = -0.10
-    B[ST_ABANDONMENT, R_ROMANTIC_TENSION] = 0.06
-    B[ST_ABANDONMENT, R_DEPENDENCY] = 0.08
-    # validation → affection↑, trust↑, tension↑
-    B[ST_VALIDATION, R_AFFECTION] = 0.12
-    B[ST_VALIDATION, R_TRUST] = 0.10
-    B[ST_VALIDATION, R_ROMANTIC_TENSION] = 0.05   # 被认可→心动
-    # closeness → affection↑, familiarity↑, safety↑, tension↑
-    B[ST_CLOSENESS, R_AFFECTION] = 0.10
-    B[ST_CLOSENESS, R_FAMILIARITY] = 0.12
-    B[ST_CLOSENESS, R_EMOTIONAL_SAFETY] = 0.08
-    B[ST_CLOSENESS, R_ROMANTIC_TENSION] = 0.06
-    # conflict → trust↓, safety↓, affection↓, tension↓
-    B[ST_CONFLICT, R_TRUST] = -0.18
-    B[ST_CONFLICT, R_EMOTIONAL_SAFETY] = -0.20
-    B[ST_CONFLICT, R_AFFECTION] = -0.08
-    B[ST_CONFLICT, R_ROMANTIC_TENSION] = -0.08
-    # dependency → dependency↑, familiarity↑, safety↑, tension↑
-    B[ST_DEPENDENCY, R_DEPENDENCY] = 0.18
-    B[ST_DEPENDENCY, R_FAMILIARITY] = 0.06
-    B[ST_DEPENDENCY, R_EMOTIONAL_SAFETY] = 0.05
-    B[ST_DEPENDENCY, R_ROMANTIC_TENSION] = 0.06   # 被需要→浪漫张力
-    # teasing → familiarity↑, tension↑
-    B[ST_TEASING, R_FAMILIARITY] = 0.08
-    B[ST_TEASING, R_ROMANTIC_TENSION] = 0.08
-    # emotional_weight → tension↑
-    B[ST_EMOTIONAL_WEIGHT, R_ROMANTIC_TENSION] = 0.05   # 情感重量→暧昧
-
-    return B
-
-
-REL_INPUT_INFLUENCE_B = _build_rel_input_influence()

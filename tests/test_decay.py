@@ -25,8 +25,8 @@ from state import (
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     T_EMOTIONAL_STABILITY, T_OPTIMISM, T_ANXIETY_PRONENESS,
     T_ANGER_REACTIVITY, T_EMOTIONAL_OPENNESS,
-    R_TRUST, R_AFFECTION, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_TRUST_BOND, R_AFFECTION, R_INTIMACY, R_INTIMACY,
+    R_TRUST_BOND, R_INTIMACY, R_SIZE,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SIZE,
     R_LABELS,
@@ -48,21 +48,15 @@ from state_engine._dynamics import compute_setpoint, compute_rel_setpoint
 # 一个典型的关系受伤场景（信任/好感受损）
 DAMAGED_REL = np.array([
     -0.5,   # R_AFFECTION — 好感降低
-    -0.6,   # R_TRUST — 信任受伤
-    -0.3,   # R_FAMILIARITY — 略疏远
-    -0.4,   # R_DEPENDENCY — 不敢依赖
-    -0.6,   # R_EMOTIONAL_SAFETY — 不安全
-    -0.3,   # R_ROMANTIC_TENSION — 张力降低
+    -0.6,   # R_TRUST_BOND — 信任受伤 + 不安全
+    -0.3,   # R_INTIMACY — 疏离 + 不敢依赖 + 张力降低
 ], dtype=np.float64)
 
 # 一个典型的关系升温场景（所有维度高正值）
 ENHANCED_REL = np.array([
      0.7,   # R_AFFECTION
-     0.8,   # R_TRUST
-     0.6,   # R_FAMILIARITY
-     0.5,   # R_DEPENDENCY
-     0.7,   # R_EMOTIONAL_SAFETY
-     0.6,   # R_ROMANTIC_TENSION
+     0.8,   # R_TRUST_BOND
+     0.6,   # R_INTIMACY
 ], dtype=np.float64)
 
 
@@ -173,7 +167,7 @@ class TestAsymmetricDecay:
         """同一维度的负向偏离衰减快于正向偏离。"""
         sp = compute_rel_setpoint(default_traits)
 
-        # 固定一个维度（以 R_TRUST 为例），其他人 setpoint
+        # 固定一个维度（以 R_TRUST_BOND 为例），其他人 setpoint
         def make_state(dim, val):
             s = sp.copy()
             s[dim] = val
@@ -289,7 +283,7 @@ class TestAsymmetricDecay:
 
         # 信任受伤
         damaged = sp.copy()
-        damaged[R_TRUST] = -0.7
+        damaged[R_TRUST_BOND] = -0.7
 
         dt = 48
 
@@ -302,9 +296,9 @@ class TestAsymmetricDecay:
         r_3x = apply_time_decay_relationship(damaged, sp, default_traits, dt, config_3x)
 
         # boost 越大 → 恢复越多（离 setpoint 更近）
-        d1 = abs(r_1x[R_TRUST] - sp[R_TRUST])
-        d2 = abs(r_2x[R_TRUST] - sp[R_TRUST])
-        d3 = abs(r_3x[R_TRUST] - sp[R_TRUST])
+        d1 = abs(r_1x[R_TRUST_BOND] - sp[R_TRUST_BOND])
+        d2 = abs(r_2x[R_TRUST_BOND] - sp[R_TRUST_BOND])
+        d3 = abs(r_3x[R_TRUST_BOND] - sp[R_TRUST_BOND])
 
         assert d1 > d2 > d3, (
             f"boost 1x 残差 {d1:.6f}，2x {d2:.6f}，3x {d3:.6f}，应单调递减"
@@ -605,7 +599,7 @@ class TestBulkStatistics:
             f"内部最大收敛误差 {max_error_i:.4f}（渐近残余包络 ~0.5）"
         )
 
-        # 关系态：k=0.001 也有渐近残余，最慢维 R_TRUST(λ=0.0014) 在 p_mod=0.3 时
+        # 关系态：k=0.001 也有渐近残余，最慢维 R_TRUST_BOND(λ=0.0014) 在 p_mod=0.3 时
         # asymp = exp(-0.0014*0.3/0.001) = exp(-0.42) ≈ 0.66，累积大量随机样本后可达 ~0.5
         assert max_error_r < 0.6, (
             f"关系最大收敛误差 {max_error_r:.4f}（渐近包络 ~0.5）"
@@ -783,21 +777,21 @@ class TestVisualization:
         import matplotlib.pyplot as plt
 
         sp = compute_rel_setpoint(default_traits)
-        trust_sp = sp[R_TRUST]
+        trust_sp = sp[R_TRUST_BOND]
 
         hours = np.linspace(0, 336, 100)  # 2 周
         damaged_trust = np.full(R_SIZE, trust_sp)
-        damaged_trust[R_TRUST] = -0.6
+        damaged_trust[R_TRUST_BOND] = -0.6
         enhanced_trust = np.full(R_SIZE, trust_sp)
-        enhanced_trust[R_TRUST] = 0.8
+        enhanced_trust[R_TRUST_BOND] = 0.8
 
         damaged_curve = []
         enhanced_curve = []
         for dt in hours:
             r1 = apply_time_decay_relationship(damaged_trust, sp, default_traits, dt)
             r2 = apply_time_decay_relationship(enhanced_trust, sp, default_traits, dt)
-            damaged_curve.append(r1[R_TRUST])
-            enhanced_curve.append(r2[R_TRUST])
+            damaged_curve.append(r1[R_TRUST_BOND])
+            enhanced_curve.append(r2[R_TRUST_BOND])
 
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(hours / 24, damaged_curve, color="#e74c3c", linewidth=2,
@@ -824,7 +818,7 @@ class TestVisualization:
                         textcoords="offset points", xytext=(5, 5), fontsize=8, color=color)
 
         ax.set_xlabel("Time (days)")
-        ax.set_ylabel("R_TRUST value")
+        ax.set_ylabel("R_TRUST_BOND value")
         ax.set_title("Asymmetric Decay: Damaged vs Enhanced Trust\n"
                      "(Negative deviation recovers faster)", fontsize=12)
         ax.legend()
@@ -957,7 +951,7 @@ class TestVisualization:
 
         hours = np.linspace(0, 336, 100)
         damaged = sp.copy()
-        damaged[R_TRUST] = -0.6
+        damaged[R_TRUST_BOND] = -0.6
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -969,13 +963,13 @@ class TestVisualization:
             curve = []
             for dt in hours:
                 r = apply_time_decay_relationship(damaged, sp, default_traits, dt, config)
-                curve.append(r[R_TRUST])
+                curve.append(r[R_TRUST_BOND])
             ax.plot(hours / 24, curve, color=color, linewidth=2, label=f"boost={boost}")
 
-        ax.axhline(y=sp[R_TRUST], color="gray", linestyle="--", alpha=0.5,
-                   label=f"Setpoint ({sp[R_TRUST]:.2f})")
+        ax.axhline(y=sp[R_TRUST_BOND], color="gray", linestyle="--", alpha=0.5,
+                   label=f"Setpoint ({sp[R_TRUST_BOND]:.2f})")
         ax.set_xlabel("Time (days)")
-        ax.set_ylabel("R_TRUST value")
+        ax.set_ylabel("R_TRUST_BOND value")
         ax.set_title("Boost Parameter Sweep: Recovery from Trust Damage (-0.6)", fontsize=12)
         ax.legend()
         ax.grid(True, alpha=0.3)

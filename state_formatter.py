@@ -15,8 +15,7 @@ from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE,
     # 关系
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY,
     # 特质
     T_PRIDE, T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
     T_OPTIMISM, T_ANGER_REACTIVITY,
@@ -160,7 +159,7 @@ def format_state_narrative(internal: np.ndarray, relationship: np.ndarray,
         polarity="-1=异常清醒  0=正常  +1=思维停滞"))
 
     # ══════════════════════════════════════════════
-    # 【对对方的感受】—— Relationship State (6维)
+    # 【对对方的感受】—— Relationship State (3维)
     #   对用户的动态关系评估。
     # ══════════════════════════════════════════════
     lines.append("")
@@ -171,25 +170,13 @@ def format_state_narrative(internal: np.ndarray, relationship: np.ndarray,
         ('冷淡', '略有', '好感', '喜欢', '深爱'),
         polarity="-1=厌恶  0=无感  +1=深爱"))
     lines.append(_format_line(
-        "信任度", relationship[R_TRUST],
-        ('戒备', '将信将疑', '基本信任', '较为信任', '全然信赖'),
-        polarity="-1=完全不信任  0=中性  +1=毫无保留"))
+        "信任安全感", relationship[R_TRUST_BOND],
+        ('戒备不安', '将信将疑', '基本安心', '较为信任', '全然放松'),
+        polarity="-1=不安戒备  0=中性  +1=全然放松"))
     lines.append(_format_line(
-        "熟悉感", relationship[R_FAMILIARITY],
-        ('陌生', '面熟', '熟悉', '亲近', '心有灵犀'),
-        polarity="-1=陌生人  0=中性  +1=灵魂伴侣"))
-    lines.append(_format_line(
-        "情感依赖", relationship[R_DEPENDENCY],
-        ('独立', '轻微', '有些', '较为依赖', '不可或缺'),
-        polarity="-1=完全独立  0=正常  +1=离不开 TA"))
-    lines.append(_format_line(
-        "情感安全感", relationship[R_EMOTIONAL_SAFETY],
-        ('不安忐忑', '略缺', '尚可', '安心', '全然放松'),
-        polarity="-1=在 TA 身边紧张不安  0=中性  +1=有 TA 就安心"))
-    lines.append(_format_line(
-        "浪漫张力", relationship[R_ROMANTIC_TENSION],
-        ('平淡如水', '微澜', '暗流涌动', '暧昧', '炽热'),
-        polarity="-1=排斥  0=平淡  +1=一触即发的暧昧"))
+        "亲密张力", relationship[R_INTIMACY],
+        ('疏离平淡', '微澜', '暗流涌动', '亲近依赖', '炽热缠绵'),
+        polarity="-1=疏离  0=平淡  +1=一触即发的暧昧"))
 
     # ══════════════════════════════════════════════
     # 【性格倾向提醒】—— Traits (10维)

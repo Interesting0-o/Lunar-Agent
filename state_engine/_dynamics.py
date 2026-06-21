@@ -22,16 +22,16 @@ import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
-    ST_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_SIZE,
+    ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
+    ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
     T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
     T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
 )
 from ._utils import soft_clamp
-from ._matrices import INPUT_INFLUENCE_B, REL_INPUT_INFLUENCE_B
+from ._matrices import INPUT_INFLUENCE_B
 
 
 def compute_setpoint(traits: np.ndarray) -> np.ndarray:
@@ -60,20 +60,17 @@ def compute_setpoint(traits: np.ndarray) -> np.ndarray:
 
 
 def compute_rel_setpoint(traits: np.ndarray) -> np.ndarray:
-    """计算人格决定的关系稳态基线。
+    """计算人格决定的关系稳态基线（3 维版）。
 
-    依恋回避 → 信任/好感/依赖基线低
-    依恋焦虑 → 依赖基线高
+    依恋回避 → 信任纽带↓, 亲密↓
+    依恋焦虑 → 亲密↑（焦虑型依赖）
     """
     sp = DEFAULT_RELATIONSHIP.copy()
 
-    sp[R_TRUST]             -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_AFFECTION]         -= traits[T_ATTACHMENT_AVOIDANCE] * 0.10
-    sp[R_DEPENDENCY]        -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_DEPENDENCY]        += traits[T_ATTACHMENT_ANXIETY] * 0.10
-    sp[R_EMOTIONAL_SAFETY]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12
-    sp[R_FAMILIARITY]       -= traits[T_ATTACHMENT_AVOIDANCE] * 0.05
-    sp[R_ROMANTIC_TENSION]  += traits[T_ATTACHMENT_ANXIETY] * 0.05
+    sp[R_TRUST_BOND]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
+    sp[R_TRUST_BOND]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12  # safety 合并
+    sp[R_INTIMACY]    -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12  # 原 fam+dep+tension 平均
+    sp[R_INTIMACY]    += traits[T_ATTACHMENT_ANXIETY] * 0.10
 
     return np.clip(sp, -0.96, 0.96)
 
@@ -96,7 +93,7 @@ def update_internal_state(
         current: 当前内部状态 h_{t-1} (8,)
         inner_stimuli: 防御过滤后的"里"刺激 (7,)
         traits: 人格特质 (10,)
-        relationship: 关系状态 (6,)
+        relationship: 关系状态 (3,)
         profiles: 防御剖面 (2, 7)
         dt: 时间步长
 
@@ -111,7 +108,7 @@ def update_internal_state(
     alpha = 0.285
     alpha += traits[T_EMOTIONAL_OPENNESS] * 0.15
     alpha -= traits[T_EMOTIONAL_STABILITY] * 0.075
-    alpha += relationship[R_TRUST] * 0.06
+    alpha += relationship[R_TRUST_BOND] * 0.06
     alpha = soft_clamp(alpha, 0.02, 0.35)
 
     # ── β: 刺激接受速率（逐刺激维度）──
@@ -193,11 +190,10 @@ def update_relationship_state(
       - β_rel 更小（刺激对关系的影响有缓冲）
       - 可选的 current_internal 参数提供跨尺度耦合（内→关）
     """
-    # ── α_rel: 关系跨维度耦合速率 ──
+        # ── α_rel: 关系跨维度耦合速率（简化：trust_bond 一维） ──
     alpha = 0.045
     alpha += traits[T_EMOTIONAL_OPENNESS] * 0.02
-    alpha += current[R_TRUST] * 0.015
-    alpha += current[R_EMOTIONAL_SAFETY] * 0.01
+    alpha += current[R_TRUST_BOND] * 0.015
     alpha = soft_clamp(alpha, 0.005, 0.06)
 
     # ── β_rel: 关系刺激接受速率 ──
@@ -205,48 +201,58 @@ def update_relationship_state(
     beta += traits[T_ATTACHMENT_ANXIETY] * 0.0075
     beta = soft_clamp(beta, 0.002, 0.06)
 
-    # ── γ_rel: 关系稳态恢复速率（已移除） ──
-    # 关系稳态恢复由 _decay.py 的时间衰减负责。
-
     # ── Δ_coupling: 关系跨维度耦合 + 自阻尼 ──
-    # 替代旧的 REL_STATE_COUPLING_A @ h − h，每维度独立自阻尼率。
-    # 全部关系维度 setpoint < 0（回避型依恋），统一 0.1503 产生向上回拉税。
-    # 更极端的回避维度（依赖/张力/熟悉度）阻尼更小，让角色保持距离感。
+    # 6 条耦合（4 正 + 2 负拮抗），比原 11 条减少 45%
     REL_SELF_DECAY = np.array([
-        0.12,  # R_AFFECTION         — setpoint -0.340
-        0.12,  # R_TRUST             — setpoint -0.310
-        0.10,  # R_FAMILIARITY       — setpoint -0.570, 慢熟
-        0.10,  # R_DEPENDENCY        — setpoint -0.600, 最独立
-        0.12,  # R_EMOTIONAL_SAFETY  — setpoint -0.428
-        0.10,  # R_ROMANTIC_TENSION  — setpoint -0.595, 慢热
+        0.12,  # R_AFFECTION     — 好感半衰期适中
+        0.12,  # R_TRUST_BOND    — 信任安全感衰减慢
+        0.10,  # R_INTIMACY      — 亲密张力衰减最慢（慢热慢冷）
     ])
 
     rel_coupling = np.zeros(R_SIZE, dtype=np.float64)
-    rel_coupling[R_TRUST]            += current[R_AFFECTION] * 0.075526      # 好感→信任
-    rel_coupling[R_TRUST]            += current[R_EMOTIONAL_SAFETY] * 0.047204  # 安全感→信任
-    rel_coupling[R_FAMILIARITY]      += current[R_AFFECTION] * 0.047204     # 好感→熟悉度
-    rel_coupling[R_DEPENDENCY]       += current[R_TRUST] * 0.047204         # 信任→依赖
-    rel_coupling[R_EMOTIONAL_SAFETY] += current[R_TRUST] * 0.094408        # 信任→安全感
-    rel_coupling[R_EMOTIONAL_SAFETY] += current[R_FAMILIARITY] * 0.075526  # 熟悉→安全感
-    rel_coupling[R_AFFECTION]        += current[R_EMOTIONAL_SAFETY] * 0.047204  # 安全感→好感
-    rel_coupling[R_AFFECTION]        += current[R_ROMANTIC_TENSION] * 0.028322  # 暧昧→好感
-    rel_coupling[R_ROMANTIC_TENSION] += current[R_DEPENDENCY] * 0.047204   # 依赖→暧昧
-    rel_coupling[R_ROMANTIC_TENSION] += current[R_AFFECTION] * 0.035       # 好感→紧张（喜欢一个人自然会紧张）
-    rel_coupling[R_ROMANTIC_TENSION] += current[R_TRUST] * 0.025          # 信任→期待（越信任越在意对方）
+    # 好感→信任（好感构建信任感）
+    rel_coupling[R_TRUST_BOND] += current[R_AFFECTION] * 0.08
+    # 信任→好感（安全基地效应）
+    rel_coupling[R_AFFECTION]  += current[R_TRUST_BOND] * 0.04
+    # 好感→亲密（喜欢让人想靠近）
+    rel_coupling[R_INTIMACY]   += current[R_AFFECTION] * 0.035
+    # 信任→亲密（信任允许深入）
+    rel_coupling[R_INTIMACY]   += current[R_TRUST_BOND] * 0.04
+    # 亲密→信任↓（过度张力降低安全感）← 拮抗负边
+    rel_coupling[R_TRUST_BOND] += current[R_INTIMACY] * (-0.02)
+    # 亲密→好感↓（张力伤好感）← 拮抗负边
+    rel_coupling[R_AFFECTION]  += current[R_INTIMACY] * (-0.02)
 
     # ── 跨尺度耦合（内→关）──
-    # 内部状态以弱系数（0.015-0.03）调制关系状态，匹配关系态慢时间常数。
     if current_internal is not None:
-        rel_coupling[R_TRUST]            += current_internal[I_STRESS] * (-0.02)    # 压力→信任↓
-        rel_coupling[R_EMOTIONAL_SAFETY]  += current_internal[I_STRESS] * (-0.03)   # 压力→安全感↓
-        rel_coupling[R_ROMANTIC_TENSION]  += current_internal[I_LONELINESS] * 0.02  # 孤独→张力↑
-        rel_coupling[R_AFFECTION]         += current_internal[I_ENERGY] * 0.015     # 精力→好感↑
-        rel_coupling[R_DEPENDENCY]        += current_internal[I_INSECURITY] * 0.02  # 不安→依赖↑
+        rel_coupling[R_TRUST_BOND] += current_internal[I_STRESS] * (-0.03)       # 压力→信任↓
+        rel_coupling[R_INTIMACY]   += current_internal[I_STRESS] * 0.015         # 压力→张力↑
+        rel_coupling[R_AFFECTION]  += current_internal[I_ENERGY] * 0.015         # 精力→好感↑
+        rel_coupling[R_INTIMACY]   += current_internal[I_INSECURITY] * 0.02      # 不安→亲密↑
+        rel_coupling[R_INTIMACY]   += current_internal[I_LONELINESS] * 0.02      # 孤独→张力↑
 
     delta_coupling = rel_coupling - REL_SELF_DECAY * current
 
-    # ── 刺激输入 ──
-    delta_stimulus = inner_stimuli @ REL_INPUT_INFLUENCE_B
+    # ── 刺激输入（去相关 B 矩阵映射）──
+    # 每条关系维度有独特的刺激签名，最大限度地减少共享输入。
+    # 唯一跨维度共享: closeness 同时驱动 affection 和 intimacy（语义必要）
+    #   但不驱动 trust_bond（旧版 closeness→trust 是 r=0.58 的主因）。
+    #
+    #   AFFECTION  ← validation (+0.18), closeness (+0.10)  → 纯正向
+    #   TRUST_BOND ← conflict (-0.25), abandonment (-0.10)  → 纯负向
+    #   INTIMACY   ← closeness (+0.06), dependency (+0.15),
+    #                 teasing (+0.10), EW (+0.08)            → 多源
+    # 密度 8/21 = 38%（接近约束⑥ 30%），旧版为 11/21=52%。
+    delta_stimulus = np.zeros(R_SIZE, dtype=np.float64)
+    delta_stimulus[R_AFFECTION]  += inner_stimuli[ST_VALIDATION] * 0.18
+    delta_stimulus[R_AFFECTION]  += inner_stimuli[ST_CLOSENESS] * 0.10
+    delta_stimulus[R_TRUST_BOND] -= inner_stimuli[ST_CONFLICT] * 0.25
+    delta_stimulus[R_TRUST_BOND] -= inner_stimuli[ST_ABANDONMENT] * 0.10
+    delta_stimulus[R_INTIMACY]   += inner_stimuli[ST_CLOSENESS] * 0.08
+    delta_stimulus[R_INTIMACY]   += inner_stimuli[ST_DEPENDENCY] * 0.15
+    delta_stimulus[R_INTIMACY]   += inner_stimuli[ST_TEASING] * 0.10
+    delta_stimulus[R_INTIMACY]   += inner_stimuli[ST_EMOTIONAL_WEIGHT] * 0.08
+    delta_stimulus *= beta
 
-    delta = alpha * delta_coupling + beta * delta_stimulus  # 无 gamma 项
+    delta = alpha * delta_coupling + delta_stimulus  # 无 gamma 项
     return soft_clamp(current + dt * delta, -1.0, 1.0)

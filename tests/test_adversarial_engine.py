@@ -46,8 +46,8 @@ from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
     # 关系状态
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_INTIMACY,
+    R_TRUST_BOND, R_INTIMACY, R_SIZE,
     # 表面状态
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
@@ -233,7 +233,7 @@ class SurfaceToStimuliMapping:
 class AgentSnapshot:
     """单个 Agent 在某一时刻的完整状态快照。"""
     internal: np.ndarray          # (8,)
-    relationship: np.ndarray      # (6,)
+    relationship: np.ndarray      # (3,)
     surface: np.ndarray           # (7,)
     traits: np.ndarray            # (10,)
     stimuli_received: np.ndarray  # (7,) 本轮接收到的刺激

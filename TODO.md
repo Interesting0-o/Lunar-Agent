@@ -1,8 +1,8 @@
 # TODO
 
 > Lunar 项目待办事项与已知问题清单。
-> 对抗检验报告见 `md/STATE_ENGINE_TEST_REPORT.md`，soft_clamp 分析见 memory。
-> 双速 SSM 框架设计见 `md/DUAL_TIMESCALE_SSM.md`，有效自由度分析见下方。
+> 对抗检验报告见 `md/ROADMAP.md`「测试报告」章节，soft_clamp 分析见 memory。
+> 双速 SSM 框架设计见 `md/AFFECTIVE_GEOMETRY_RESEARCH.md`「双速 SSM 深度分析」章节，有效自由度分析见下方。
 
 ---
 
@@ -34,7 +34,7 @@
   - **数据**：irritation×mental_fatigue r=+0.997，familiarity×romantic_tension r=+0.997，familiarity×dependency r=+0.986，前 2 个主成分解释 73% 方差
   - **根因**：耦合矩阵过密，维度间全协同无拮抗；关系维度 6 维全部正相关同步运动；pride 锁死在 Traits 不是动态状态
   - **影响**：心理表达力 ≈ 6 维而非 14 维；关系维度实际只编码 2-3 件事；longing/insecurity 独立方差 < 10%
-  - **方向**：见 `md/DUAL_TIMESCALE_SSM.md` 双速分解（PAD 正交基底 + 慢速依恋关系）或稀疏化耦合
+  - **方向**：见 `md/AFFECTIVE_GEOMETRY_RESEARCH.md` 双速分解（PAD 正交基底 + 慢速依恋关系）或稀疏化耦合
 - [ ] State Formatter 重写：当前 `_desc()` 将连续状态离散化为 5 级文本描述，破坏 State Engine 连续性。
 - [x] 时间驱动衰减：~~引入真实时间戳机制~~ ✅ 已完成。
 - [ ] **硬编码参数过多**：State Engine 总计 ~190 个手工数值，详见下方「P1 → 参数管理」。

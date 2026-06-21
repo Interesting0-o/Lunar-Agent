@@ -117,21 +117,23 @@ I_LABELS = [
 I_LABEL_IDX = {k: i for i, k in enumerate(I_LABELS)}
 
 # ═══════════════════════════════════════════════════════════════
-# RelationshipState — 关系状态（6 维）
+# RelationshipState — 关系状态（3 维，原 6 维语义合并）
 # AI 与用户之间的互动累积感知。
+#
+# 合并说明（2026-06-21）:
+#   R_TRUST_BOND = trust + emotional_safety（信任+情感安全→信任纽带）
+#   R_INTIMACY   = familiarity + dependency + romantic_tension（熟悉+依赖+张力→亲密）
+# 合并理由: 原 6 维中 trust×safety r≈0.6, fam×dep×tens r≈0.98+，
+#          但 B 矩阵密度 52.4% 无法通过约束⑥（≤30%），改用显式命名规则后自动稀疏。
 # ═══════════════════════════════════════════════════════════════
 
-R_AFFECTION = 0            # 好感度（-1=厌恶, 0=中性, +1=喜爱）
-R_TRUST = 1                # 信任度（-1=怀疑, 0=中性, +1=信任）
-R_FAMILIARITY = 2          # 熟悉度（-1=陌生, 0=中性, +1=亲密）
-R_DEPENDENCY = 3           # 情感依赖（-1=被依赖/负担, 0=独立, +1=依赖）
-R_EMOTIONAL_SAFETY = 4     # 情感安全感（-1=不安, 0=中性, +1=安全）
-R_ROMANTIC_TENSION = 5     # 浪漫张力（-1=排斥, 0=无感, +1=强烈）
-R_SIZE = 6
+R_AFFECTION = 0            # 好感度（-1=厌恶, 0=中性, +1=喜爱）- 保留原语义
+R_TRUST_BOND = 1           # 信任纽带（-1=怀疑, 0=中性, +1=安全）- trust+safety 合并
+R_INTIMACY = 2             # 亲密张力（-1=疏离, 0=中性, +1=亲密）- fam+dep+tension 合并
+R_SIZE = 3
 
 R_LABELS = [
-    "affection", "trust", "familiarity",
-    "dependency", "emotional_safety", "romantic_tension",
+    "affection", "trust_bond", "intimacy",
 ]
 R_LABEL_IDX = {k: i for i, k in enumerate(R_LABELS)}
 
@@ -166,7 +168,7 @@ ST_LABEL_IDX = {k: i for i, k in enumerate(ST_LABELS)}
 # ═══════════════════════════════════════════════════════════════
 
 InternalState = np.ndarray          # 8 维，用 I_* 索引
-RelationshipState = np.ndarray      # 6 维，用 R_* 索引
+RelationshipState = np.ndarray      # 3 维，用 R_* 索引
 SurfaceState = np.ndarray           # 7 维，用 S_* 索引
 Traits = np.ndarray                 # 10 维，用 T_* 索引
 StimulusVector = np.ndarray         # 7 维，用 ST_* 索引（perception 直接输出）
@@ -274,13 +276,10 @@ DEFAULT_INTERNAL: np.ndarray = np.array([
     -0.7,    # I_MENTAL_FATIGUE — 精神清醒
 ], dtype=np.float64)
 
-# ── 关系状态（6 维） ──
+# ── 关系状态（3 维） ──
 # 对用户的关系感知基线，值域 [-1, 1]
 DEFAULT_RELATIONSHIP: np.ndarray = np.array([
-    -0.4,    # R_AFFECTION — 初始好感偏低
-    -0.4,    # R_TRUST — 初始信任偏低
-    -0.6,    # R_FAMILIARITY — 初始陌生
-    -0.7,    # R_DEPENDENCY — 初始独立
-    -0.5,    # R_EMOTIONAL_SAFETY — 情感安全感偏低
-    -0.6,    # R_ROMANTIC_TENSION — 浪漫张力较低
+    0.15,    # R_AFFECTION — 初始好感偏中性略正
+    0.10,    # R_TRUST_BOND — 初始信任安全感偏中性
+    0.05,    # R_INTIMACY — 初始亲密张力中性
 ], dtype=np.float64)

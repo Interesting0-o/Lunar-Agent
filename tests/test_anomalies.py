@@ -9,8 +9,8 @@ from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_INTIMACY,
+    R_TRUST_BOND, R_INTIMACY, R_SIZE,
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
@@ -139,7 +139,7 @@ class TestAnomalyRateParameters:
 
         n = 20_000
         traits = rng.uniform(-0.999, 0.999, size=(n, 10))
-        rel = rng.uniform(-0.999, 0.999, size=(n, 6))
+        rel = rng.uniform(-0.999, 0.999, size=(n, R_SIZE))
         internal = rng.uniform(-0.999, 0.999, size=(n, 8))
 
         alphas = np.empty(n)
@@ -156,7 +156,7 @@ class TestAnomalyRateParameters:
             alpha = 0.285
             alpha += t[T_EMOTIONAL_OPENNESS] * 0.15
             alpha -= t[T_EMOTIONAL_STABILITY] * 0.075
-            alpha += r[R_TRUST] * 0.06
+            alpha += r[R_TRUST_BOND] * 0.06
             alpha = soft_clamp(alpha, 0.02, 0.35)
             alphas[i] = alpha
 
@@ -197,7 +197,7 @@ class TestAnomalyRateParameters:
         """探测防御剖面在何种参数组合下达到极端值（接近 0 或 1）。"""
         n = 30_000
         traits = rng.beta(0.2, 0.2, size=(n, 10)) * 2 - 1
-        rel = rng.beta(0.2, 0.2, size=(n, 6)) * 2 - 1
+        rel = rng.beta(0.2, 0.2, size=(n, R_SIZE)) * 2 - 1
         internal = rng.beta(0.2, 0.2, size=(n, 8)) * 2 - 1
 
         deact_means = np.empty(n)
@@ -294,7 +294,7 @@ class TestAnomalyDefenseCollapse:
         """deact 和 hyper 的相关性 —— 如果高度相关则失去了独立防御维度的意义。"""
         n = 30_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         internal = rng.uniform(-1, 1, size=(n, 8))
 
         deact_arr = np.empty(n)
@@ -422,7 +422,7 @@ class TestAnomalySurfaceDegeneracy:
         """在随机参数空间中 surface 各维度达到 [-1.0, -0.99] 或 [0.99, 1.0] 的频率。"""
         n = 50_000
         internal = rng.uniform(-1, 1, size=(n, 8))
-        relationship = rng.uniform(-1, 1, size=(n, 6))
+        relationship = rng.uniform(-1, 1, size=(n, R_SIZE))
         traits = rng.uniform(-1, 1, size=(n, 10))
         outer = rng.uniform(-1, 1, size=(n, 7))
 
@@ -459,7 +459,7 @@ class TestAnomalyBetaModulation:
         """
         n = 50_000
         traits_batch = rng.uniform(-1, 1, size=(n, 10))
-        rel_batch = rng.uniform(-1, 1, size=(n, 6))
+        rel_batch = rng.uniform(-1, 1, size=(n, R_SIZE))
         internal_batch = rng.uniform(-1, 1, size=(n, 8))
 
         scalar_betas = np.empty(n)          # 旧版标量兼容：deact.mean(), hyper.mean()

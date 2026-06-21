@@ -56,12 +56,12 @@ def update_all(
 
     Args:
         current_internal: 当前内部状态 h_{t-1} (8,) 或 None
-        current_relationship: 当前关系状态 r_{t-1} (6,) 或 None
+        current_relationship: 当前关系状态 r_{t-1} (3,) 或 None
         traits: 人格特质 (10,)
         stimuli: 原始心理刺激 (7,)
 
     Returns:
-        {"internal_state": (8,), "relationship_state": (6,), "surface_state": (7,)}
+        {"internal_state": (8,), "relationship_state": (3,), "surface_state": (7,)}
     """
     if current_internal is None:
         return initialize_all(traits)

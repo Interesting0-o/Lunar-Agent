@@ -63,7 +63,7 @@ class MemoryNode(BaseModel):
         content: 详细内容（用户消息 + 角色回复的完整文本）。
         created_at: ISO 8601 创建时间戳。
         state_checkpoint: 形成时的心理状态快照。
-            keys: "internal_state" (8,), "relationship_state" (6,), "surface_state" (7,)
+            keys: "internal_state" (8,), "relationship_state" (3,), "surface_state" (7,)
             values: numpy float64 数组
         embedding: 文本语义嵌入向量（由 embedding 模型生成），
                    用于与 state_checkpoint 联合做双重相似度检索。
@@ -143,7 +143,7 @@ class MemoryNode(BaseModel):
             title: 记忆标题。
             content: 记忆内容。
             internal_state: 内部状态向量 (8,)。
-            relationship_state: 关系状态向量 (6,)。
+            relationship_state: 关系状态向量 (3,)。
             surface_state: 表面状态向量 (7,)。
             embedding: 文本语义嵌入向量（可选）。
         """

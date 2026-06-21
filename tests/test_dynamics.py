@@ -15,8 +15,7 @@ from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
@@ -94,8 +93,8 @@ class TestSetpoint:
 
         sp_low = compute_rel_setpoint(t_low)
         sp_high = compute_rel_setpoint(t_high)
-        assert sp_high[R_TRUST] < sp_low[R_TRUST], (
-            f"高回避 trust sp={sp_high[R_TRUST]:.3f} ≥ 低回避={sp_low[R_TRUST]:.3f}"
+        assert sp_high[R_TRUST_BOND] < sp_low[R_TRUST_BOND], (
+            f"高回避 trust sp={sp_high[R_TRUST_BOND]:.3f} ≥ 低回避={sp_low[R_TRUST_BOND]:.3f}"
         )
 
     def test_default_setpoint_finite(self, default_traits):
@@ -287,21 +286,57 @@ class TestStimulusDirectionality:
 
     # ── 关系状态（B_rel） ──
 
-    def test_rel_abandonment_reduces_safety(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_ABANDONMENT, R_EMOTIONAL_SAFETY] < 0
+    def test_rel_abandonment_reduces_trust_bond(self):
+        """验证新显式命名规则: abandonment → trust_bond--."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_ABANDONMENT] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_TRUST_BOND] < curr[R_TRUST_BOND], \
+            "abandonment 应减少信任纽带"
 
     def test_rel_validation_increases_affection(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_VALIDATION, R_AFFECTION] > 0
+        """验证新显式命名规则: validation → affection++."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_VALIDATION] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_AFFECTION] > curr[R_AFFECTION], \
+            "validation 应增加好感度"
 
-    def test_rel_closeness_increases_familiarity(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_CLOSENESS, R_FAMILIARITY] > 0
+    def test_rel_closeness_increases_intimacy(self):
+        """验证新显式命名规则: closeness → intimacy++."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_CLOSENESS] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_INTIMACY] > curr[R_INTIMACY], \
+            "closeness 应增加亲密张力"
 
-    def test_rel_conflict_reduces_trust(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_CONFLICT, R_TRUST] < 0
+    def test_rel_conflict_reduces_trust_bond(self):
+        """验证新显式命名规则: conflict → trust_bond--."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_CONFLICT] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_TRUST_BOND] < curr[R_TRUST_BOND], \
+            "conflict 应减少信任纽带"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -390,7 +425,7 @@ class TestDynamicsBulk:
         """5000 组随机输入: update_internal_state 输出 ∈ [-1, 1]。"""
         n = 20_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         current = rng.uniform(-1, 1, size=(n, 8))
         stimuli = rng.uniform(0, 1, size=(n, 7))
         # profiles 也用随机值（但由 traits 决定，这里直接随机化）
@@ -416,7 +451,7 @@ class TestDynamicsBulk:
         """5000 组随机输入: update_relationship_state 输出 ∈ [-1, 1]。"""
         n = 20_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        current = rng.uniform(-1, 1, size=(n, 6))
+        current = rng.uniform(-1, 1, size=(n, R_SIZE))
         stimuli = rng.uniform(0, 1, size=(n, 7))
 
         violations = 0
@@ -455,7 +490,7 @@ class TestDynamicsBulk:
         """大规模统计: 单轮变化幅度的分布。"""
         n = 15_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         current = rng.uniform(-1, 1, size=(n, 8))
         stimuli = rng.uniform(0, 1, size=(n, 7))
 

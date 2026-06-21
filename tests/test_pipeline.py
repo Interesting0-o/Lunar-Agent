@@ -15,8 +15,8 @@ from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_INTIMACY,
+    R_TRUST_BOND, R_INTIMACY, R_SIZE,
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
@@ -95,7 +95,7 @@ class TestScenarios:
             "被抛弃应增加孤独感"
         assert result["internal_state"][I_STRESS] > self.internal[I_STRESS], \
             "被抛弃应增加压力"
-        assert result["relationship_state"][R_EMOTIONAL_SAFETY] < self.relationship[R_EMOTIONAL_SAFETY], \
+        assert result["relationship_state"][R_TRUST_BOND] < self.relationship[R_TRUST_BOND], \
             "被抛弃应减少情感安全"
 
     def test_validation_scenario(self):
@@ -124,7 +124,7 @@ class TestScenarios:
             "冲突应增加烦躁"
         assert result["internal_state"][I_ENERGY] < self.internal[I_ENERGY], \
             "冲突应消耗精力"
-        assert result["relationship_state"][R_TRUST] < self.relationship[R_TRUST], \
+        assert result["relationship_state"][R_TRUST_BOND] < self.relationship[R_TRUST_BOND], \
             "冲突应减少信任"
 
     def test_closeness_scenario(self):
@@ -134,9 +134,9 @@ class TestScenarios:
 
         assert result["internal_state"][I_LONELINESS] < self.internal[I_LONELINESS], \
             "亲密应减少孤独感"
-        assert result["relationship_state"][R_FAMILIARITY] > self.relationship[R_FAMILIARITY], \
+        assert result["relationship_state"][R_INTIMACY] > self.relationship[R_INTIMACY], \
             "亲密应增加熟悉度"
-        assert result["relationship_state"][R_EMOTIONAL_SAFETY] > self.relationship[R_EMOTIONAL_SAFETY], \
+        assert result["relationship_state"][R_TRUST_BOND] > self.relationship[R_TRUST_BOND], \
             "亲密应增加情感安全"
 
     def test_teasing_scenario(self):
@@ -144,7 +144,7 @@ class TestScenarios:
         s = np.zeros(ST_SIZE); s[ST_TEASING] = 0.7
         result = self._apply(s)
 
-        assert result["relationship_state"][R_FAMILIARITY] > self.relationship[R_FAMILIARITY], \
+        assert result["relationship_state"][R_INTIMACY] > self.relationship[R_INTIMACY], \
             "调侃应增加熟悉度"
 
 
@@ -182,7 +182,7 @@ class TestRepeatedSingleStimulus:
             "被抛弃重复刺激应持续增加孤独感"
         assert np.all(np.diff(internal_hist[:, I_STRESS]) >= -1e-12), \
             "被抛弃重复刺激应持续增加压力"
-        assert np.all(np.diff(rel_hist[:, R_EMOTIONAL_SAFETY]) <= 1e-12), \
+        assert np.all(np.diff(rel_hist[:, R_TRUST_BOND]) <= 1e-12), \
             "被抛弃重复刺激应持续降低情感安全"
 
     def test_repeated_validation_monotonic(self):
@@ -200,18 +200,18 @@ class TestRepeatedSingleStimulus:
 
         assert np.all(np.diff(internal_hist[:, I_LONELINESS]) <= 1e-12), \
             "亲密重复刺激应持续减少孤独感"
-        assert np.all(np.diff(rel_hist[:, R_FAMILIARITY]) >= -1e-12), \
+        assert np.all(np.diff(rel_hist[:, R_INTIMACY]) >= -1e-12), \
             "亲密重复刺激应持续增加熟悉度"
-        assert np.all(np.diff(rel_hist[:, R_EMOTIONAL_SAFETY]) >= -1e-12), \
+        assert np.all(np.diff(rel_hist[:, R_TRUST_BOND]) >= -1e-12), \
             "亲密重复刺激应持续增加情感安全"
 
     def test_repeated_teasing_monotonic(self):
         s = np.zeros(ST_SIZE); s[ST_TEASING] = 0.85
         internal_hist, rel_hist = self._repeat(s)
 
-        assert np.all(np.diff(rel_hist[:, R_FAMILIARITY]) >= -1e-12), \
+        assert np.all(np.diff(rel_hist[:, R_INTIMACY]) >= -1e-12), \
             "调侃重复刺激应持续增加熟悉度"
-        assert np.all(np.diff(rel_hist[:, R_ROMANTIC_TENSION]) >= -1e-12), \
+        assert np.all(np.diff(rel_hist[:, R_INTIMACY]) >= -1e-12), \
             "调侃重复刺激应持续增加浪漫张力"
 
 
@@ -229,14 +229,14 @@ class TestMultiRound:
         current_rel = default_relationship.copy()
 
         stress_history = [current_internal[I_STRESS]]
-        trust_history = [current_rel[R_TRUST]]
+        trust_history = [current_rel[R_TRUST_BOND]]
 
         for _ in range(10):
             result = update_all(current_internal, current_rel, default_traits, s)
             current_internal = result["internal_state"]
             current_rel = result["relationship_state"]
             stress_history.append(current_internal[I_STRESS])
-            trust_history.append(current_rel[R_TRUST])
+            trust_history.append(current_rel[R_TRUST_BOND])
 
         # 压力应单调递增
         for i in range(1, len(stress_history)):
@@ -424,7 +424,7 @@ class TestMonteCarloMassive:
         n = 50_000
         traits_batch = rng.uniform(-0.999, 0.999, size=(n, 10))
         internal_batch = rng.uniform(-0.999, 0.999, size=(n, 8))
-        rel_batch = rng.uniform(-0.999, 0.999, size=(n, 6))
+        rel_batch = rng.uniform(-0.999, 0.999, size=(n, R_SIZE))
         stimuli_batch = rng.uniform(0, 1, size=(n, 7))
 
         violations = []

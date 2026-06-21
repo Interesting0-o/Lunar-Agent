@@ -11,7 +11,7 @@ from state import (
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     T_PRIDE, T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
     T_JEALOUSY_SENSITIVITY, T_SENSITIVITY,
-    R_TRUST, R_EMOTIONAL_SAFETY, R_AFFECTION, R_ROMANTIC_TENSION,
+    R_TRUST_BOND, R_TRUST_BOND, R_AFFECTION, R_INTIMACY,
     I_STRESS, I_INSECURITY, I_LONGING,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
@@ -145,9 +145,9 @@ class TestDefenseDirectional:
     def test_trust_reduces_deactivation(self, default_traits, default_internal):
         """高信任 → 去激活降低。"""
         r_low = DEFAULT_RELATIONSHIP.copy()
-        r_low[R_TRUST] = -0.8
+        r_low[R_TRUST_BOND] = -0.8
         r_high = DEFAULT_RELATIONSHIP.copy()
-        r_high[R_TRUST] = 0.8
+        r_high[R_TRUST_BOND] = 0.8
 
         p_low = compute_defense_profiles(default_traits, r_low, default_internal)
         p_high = compute_defense_profiles(default_traits, r_high, default_internal)
@@ -245,9 +245,9 @@ class TestDefenseDirectional:
         验证各维 Δ 不等效。
         """
         r_low = DEFAULT_RELATIONSHIP.copy()
-        r_low[R_TRUST] = -0.8
+        r_low[R_TRUST_BOND] = -0.8
         r_high = DEFAULT_RELATIONSHIP.copy()
-        r_high[R_TRUST] = 0.8
+        r_high[R_TRUST_BOND] = 0.8
 
         p_low = compute_defense_profiles(default_traits, r_low, default_internal)
         p_high = compute_defense_profiles(default_traits, r_high, default_internal)

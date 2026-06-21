@@ -25,8 +25,7 @@ from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
     # 关系状态索引
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_SIZE,
     # 特质索引
     T_EMOTIONAL_STABILITY, T_OPTIMISM, T_ANXIETY_PRONENESS,
     T_ANGER_REACTIVITY, T_EMOTIONAL_OPENNESS,
@@ -59,12 +58,9 @@ class DecayConfig:
 
     # 关系状态: 天级 (λ 很小)
     relationship_lambda: np.ndarray = field(default_factory=lambda: np.array([
-        0.0021,  # R_AFFECTION        — 好感, 半衰期 ~14d
-        0.0014,  # R_TRUST            — 信任, ~21d
-        0.0041,  # R_FAMILIARITY      — 熟悉, ~7d
-        0.0029,  # R_DEPENDENCY       — 依赖, ~10d
-        0.0021,  # R_EMOTIONAL_SAFETY — 情感安全, ~14d
-        0.0058,  # R_ROMANTIC_TENSION — 浪漫张力, ~5d
+        0.0021,  # R_AFFECTION    — 好感, ~14d（保留原值）
+        0.0021,  # R_TRUST_BOND   — 信任纽带, ~14d（trust+safety 原值平均）
+        0.0041,  # R_INTIMACY     — 亲密张力, ~7d（取三者的最大值）
     ], dtype=np.float64))
 
     # ── 时间曲线参数 ──
@@ -201,8 +197,8 @@ def apply_time_decay_relationship(
     """对关系状态应用时间衰减。
 
     Args:
-        current: 当前关系状态 (6,)
-        setpoint: 人格决定的关系稳态基线 (6,)
+        current: 当前关系状态 (3,)
+        setpoint: 人格决定的关系稳态基线 (3,)
         traits: 人格特质 (10,)
         delta_hours: 自上次更新以来的实际时间 (小时)
         config: 衰减参数配置
@@ -245,13 +241,13 @@ def apply_time_decay(
 
     Args:
         current_internal: 当前内部状态 (8,)
-        current_relationship: 当前关系状态 (6,)
+        current_relationship: 当前关系状态 (3,)
         traits: 人格特质 (10,)
         delta_hours: 自上次更新以来的实际时间 (小时)
         config: 衰减参数配置
 
     Returns:
-        {"internal_state": (8,), "relationship_state": (6,)}
+        {"internal_state": (8,), "relationship_state": (3,)}
     """
     internal_sp = compute_setpoint(traits)
     rel_sp = compute_rel_setpoint(traits)

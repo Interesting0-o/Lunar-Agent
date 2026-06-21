@@ -12,7 +12,7 @@ import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_MENTAL_FATIGUE,
-    R_AFFECTION, R_EMOTIONAL_SAFETY,
+    R_AFFECTION, R_TRUST_BOND,
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
     T_PRIDE, T_EMOTIONAL_OPENNESS, T_OPTIMISM,
@@ -40,7 +40,7 @@ def project_surface(
     s[S_EXPRESSIVENESS] = -0.3 + internal[I_ENERGY] * 0.4 - internal[I_MENTAL_FATIGUE] * 0.15
     s[S_WARMTH]         = -0.2 + relationship[R_AFFECTION] * 0.4 - internal[I_STRESS] * 0.15
     s[S_SHARPNESS]      = -0.1 + internal[I_IRRITATION] * 0.5 + internal[I_STRESS] * 0.15
-    s[S_SOFTNESS]       = -0.1 + relationship[R_EMOTIONAL_SAFETY] * 0.2   # stress 移除，由 emotional_safety 主导
+    s[S_SOFTNESS]       = -0.1 + relationship[R_TRUST_BOND] * 0.2   # trust+safety 合并
     s[S_ENTHUSIASM]     = -0.2 + internal[I_ENERGY] * 0.5 - internal[I_MENTAL_FATIGUE] * 0.15
     s[S_RESTRAINT]      = -0.1 + internal[I_INSECURITY] * 0.3 + traits[T_PRIDE] * 0.2 + internal[I_STRESS] * 0.20
     s[S_VULNERABILITY]  = -0.5 + internal[I_LONELINESS] * 0.3 + internal[I_LONGING] * 0.2 - traits[T_PRIDE] * 0.2
