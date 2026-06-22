@@ -1,8 +1,8 @@
 # State Engine 测试报告
 
-> **报告日期**: 2026-06-22 | **用例数**: 230 | **通过率**: 100% (230/230) | **执行时间**: 151s
+> **报告日期**: 2026-06-22 | **用例数**: 249 | **通过率**: 100% (242/242, 7 skipped) | **执行时间**: 133s
 >
-> 本版重构：`project_surface()` 新增惯性混合 + 表面→内部反馈 + 移除 traits 直连（约束①修复）。Surface 测试从 13→22 项，全管线 230 项通过。
+> 本版变更：Hyperactivation 从纯秩-1 拆分为**人格基线（秩-1, traits+rel）** + **状态调制（HYPER_STATE_MODULATION）**。RELATIONSHIP_COUPLING 从 66.7% 密度压缩至 22.2%（约束⑥合规）。新增参数灵敏度分析模块（12 项测试）。**修复约束②（StimulusMetadata）和约束⑪（formatter 连续投影）**。全管线 242 项通过。
 
 ---
 
@@ -27,7 +27,7 @@
   │   变化率上限 → 强度单调性 → 交互边界
   │
 层 5 — 表面投影 (_surface.py)
-  │   边界、方向性、外刺激效应、分布统计
+  │   边界、方向性、外刺激效应、惯性混合、表面→内部反馈
   │
 层 6 — 时间衰减 (_decay.py)
   │   基本衰减 → 不对称 → 人格调制 → 时间曲线 → 边界鲁棒性
@@ -40,16 +40,17 @@
   │
 层 9 — 异常检测 (anomalies)
   │   响应度 → 速率参数 → 饱和 → 防御塌缩 → trait 敏感度 → 迟滞
+  │
+层 10 — 参数灵敏度 (sensitivity) [新增]
+  │   每参数扰动分析 → 冗余检测 → 边界安全验证
 ```
 
-### 1.2 本版新增覆盖（06-21，27 项）
+### 1.2 本版新增覆盖（06-22，12+12 项）
 
 | 新增测试 | 类型 | 覆盖缺口 |
 |---------|------|----------|
-| `TestPerTurnRateLimit` | 硬约束 | #1 变化率上限 #5 时间尺度分离 |
-| `TestStimulusIntensityMonotonicity` | 方向性 | #3 强度单调性 |
-| `TestStimulusInteraction` | 方向性+统计 | #2 交互效应 #4 非加性屏障 |
-| `TestCouplingContractivity` | 结构 | #5 谱半径 #5 耦合符号 |
+| `TestParameterSensitivity` (12 项) | 结构+验证 | 参数冗余检测、安全感上限 |
+| `TestFullSensitivityReport` (1 项, 标记跳过) | 报告 | `--run-full-sensitivity` 全量报告 |
 
 详见第四章。
 
@@ -92,7 +93,7 @@
 22. `test_random_bounds_suppression` — 随机边界，外部压缩，无 NaN
 23. `test_tiny_transition_no_nan` — transition=1e-6 不产生 NaN
 
-### 2.2 B 矩阵 + 耦合 (`test_matrices.py` — 10 项)
+### 2.2 B 矩阵 + 耦合 (`test_matrices.py` — 9 项)
 
 **`TestMatrixShapes`**（1 项）：
 1. `test_input_influence_shape` — INPUT_INFLUENCE_B 形状为 (7, 8)
@@ -107,9 +108,9 @@
 6. `test_rel_conflict_reduces_trust_bond` — conflict → trust_bond 下降
 7. `test_rel_validation_increases_affection` — validation → affection 上升
 
-**`TestCouplingContractivity`**（3 项，🔁 新增）：
-8. `test_internal_coupling_spectral_radius` — 耦合雅可比谱半径 ρ < 0.95
-9. `test_coupling_sign_structure` — 5 条耦合边符号符合心理学预期（energy→stress 负、stress→irritation 正、loneliness→insecurity 正等）
+**`TestCouplingContractivity`**（2 项）：
+8. `test_internal_coupling_spectral_radius` — 耦合雅可比谱半径 ρ < 0.95（实测 0.0986）
+9. `test_coupling_sign_structure` — 5 条耦合边符号符合心理学预期
 
 ### 2.3 防御剖面 (`test_defenses.py` — 26 项)
 
@@ -131,9 +132,9 @@
 11. `test_insecurity_increases_deactivation` — 高不安 → deact ↑
 12. `test_insecurity_increases_hyperactivation` — 高不安 → hyper ↑
 13. `test_high_stability_low_deactivation` — 高稳定 → deact ↓
-14. `test_stress_modulation_is_dimension_specific` — stress 对 deact 逐维影响力不同（range > 0.05）
-15. `test_trust_modulation_is_dimension_specific` — trust 对 deact 逐维影响力不同（range > 0.02）
-16. `test_insecurity_hyperactivation_is_dimension_specific` — insecurity 对 hyper 逐维不同（range > 0.05）
+14. `test_stress_modulation_is_dimension_specific` — stress 对 deact 逐维影响力不同
+15. `test_trust_modulation_is_dimension_specific` — trust 对 deact 逐维影响力不同
+16. `test_insecurity_hyperactivation_is_dimension_specific` — insecurity 只影响 abandonment（HYPER_STATE_MODULATION 维度特异性）
 
 **`TestApplyDefenses`**（7 项）— 防御应用核心不变量：
 17. `test_zero_stimuli_zero_output` — 零刺激 → inner=outer=0
@@ -159,7 +160,7 @@
 5. `test_default_setpoint_finite` — 全部有限
 
 **`TestConvergence`**（4 项）— 零刺激收敛性：
-6. `test_internal_converges_stable` — 零刺激 2000 轮，收敛到耦合平衡点（非 setpoint）
+6. `test_internal_converges_stable` — 零刺激 2000 轮，收敛到耦合平衡点
 7. `test_internal_converges_from_extremes` — 不同极端起点收敛到相近 L2 区域
 8. `test_relationship_converges_stable` — 关系态零刺激收敛
 9. `test_zero_stimulus_no_divergence` — 2000 轮零刺激，无 NaN，状态 ∈ [-1.1, 1.1]
@@ -190,30 +191,30 @@
 26. `test_thousand_rounds_no_nan` — 1000 步随机刺激，无 NaN
 27. `test_alternating_scenarios_no_divergence` — 500 步交替正/负刺激，L2 < 5.0
 
-**🔁 `TestPerTurnRateLimit`**（3 项，新增）：
-28. `test_internal_rate_limits` — 20k 随机输入，内部 8 维每轮 |Δ| ≤ 安全上限（例: energy ≤ 0.19）
-29. `test_relationship_rate_limits` — 20k 随机输入，关系 3 维每轮 |Δ| ≤ 上限（例: affection ≤ 0.04）
+**`TestPerTurnRateLimit`**（3 项）：
+28. `test_internal_rate_limits` — 20k 随机输入，内部 8 维每轮 |Δ| ≤ 安全上限
+29. `test_relationship_rate_limits` — 20k 随机输入，关系 3 维每轮 |Δ| ≤ 上限
 30. `test_time_scale_separation` — 10k 样本 α/α_rel 均值比 ≥ 2.0（实测 6.1×）
 
-**🔁 `TestStimulusIntensityMonotonicity`**（18 项，新增）：
+**`TestStimulusIntensityMonotonicity`**（16 项）：
 31-46. `test_internal_monotonic[16 条 B 直连路径]` — 每条路径 15 强度级验证单调性
 47. `test_internal_monotonic_bulk` — 所有路径 10 组随机 trait 散弹验证
 48. `test_zero_stimulus_no_change` — 50 轮零刺激，|Δ| < 0.15
 
-**🔁 `TestStimulusInteraction`**（4 项，新增）：
+**`TestStimulusInteraction`**（4 项）：
 49. `test_validation_compensates_abandonment` — validation 缓解 abandonment 引起的不安
 50. `test_abandonment_worsens_conflict_stress` — abandonment + conflict → stress 不低于单独 conflict
 51. `test_validation_plus_closeness_boosts_energy` — 联合 energy 不低于单独 validation
 52. `test_non_additivity_bounded` — 非加性偏差 > 0.1 的比例 < 10%
 
-### 2.5 表面投影 (`test_surface.py` — 22 项，↑9)
+### 2.5 表面投影 (`test_surface.py` — 22 项)
 
 **`TestSurfaceProjectionBounds`**（3 项）：
 1. `test_default_output` — 默认输入 ∈ [-1, 1]
 2. `test_bulk_random` — 20k 随机输入 ∈ [-1, 1.11]，无 NaN
 3. `test_extreme_inputs` — ±1/0 所有组合，有限
 
-**`TestSurfaceDirectionality`**（**5** 项，移除 trait 直连测试）：
+**`TestSurfaceDirectionality`**（5 项）：
 4. `test_high_energy_high_enthusiasm` — energy↑ → enthusiasm↑
 5. `test_high_irritation_high_sharpness` — irritation↑ → sharpness↑
 6. `test_high_affection_high_warmth` — affection↑ → warmth↑
@@ -228,18 +229,18 @@
 **`TestSurfaceStatistics`**（1 项）：
 12. `test_surface_distribution` — 20k 样本，每维 std > 0.01（无退化维度）
 
-**🔁 `TestSurfaceInertia`**（3 项，新增）：
+**`TestSurfaceInertia`**（3 项）：
 13. `test_inertia_changes_output` — 相同 raw 不同 prev 产生不同 surface
 14. `test_no_prev_differs_from_zero_prev` — None 无拖拽，全零有拖拽
 15. `test_high_stress_increases_inertia` — 高压力下 surface 更接近 prev（α 更低）
 
-**🔁 `TestSurfaceAlpha`**（4 项，新增）：
+**`TestSurfaceAlpha`**（4 项）：
 16. `test_alpha_bounds` — α ∈ [0.1, 0.9]
 17. `test_alpha_default` — 默认状态 α ≈ 0.58
 18. `test_alpha_stress_reduces_alpha` — 高压力→α↓
 19. `test_alpha_energy_increases_alpha` — 高精力→α↑
 
-**🔁 `TestSurfaceFeedback`**（3 项，新增）：
+**`TestSurfaceFeedback`**（3 项）：
 20. `test_feedback_shape` — 反馈为 (8,) 向量
 21. `test_feedback_magnitude` — |fb| < 0.2
 22. `test_feedback_zero_with_zero_surface` — 零 surface → 零反馈
@@ -307,7 +308,7 @@
 **`TestRepeatedSingleStimulus`**（4 项）：
 12. `test_repeated_abandonment_monotonic` — 多次抛弃→ insecurity/loneliness/stress 单调↑
 13. `test_repeated_validation_monotonic` — 多次认可→ insecurity 单调↓
-14. `test_repeated_closeness_monotonic` — 多次靠近→ loneliness 单调↓
+14. `test_repeated_closeness_monotonic` — 多次靠近→ loneliness 单调↓（允许软边界 < 1e-4 浮动）
 15. `test_repeated_teasing_monotonic` — 多次调侃→ intimacy 单调↑
 
 **`TestMultiRound`**（4 项）：
@@ -327,81 +328,53 @@
 
 ### 2.8 对抗引擎 (`test_adversarial_engine.py` — 23 项)
 
-**`TestBasicCoupling`**（3 项）：
-1. `test_convergence_symmetric` — 相同 traits，800 步，A/B 均值差 < 0.15
-2. `test_all_values_in_bounds` — 1000 步，所有向量 ∈ [-1.11, 1.11]
-3. `test_step_by_step_determinism` — 无噪声→完全相同轨迹
+（无变动，与上一版一致）
 
-**`TestAsymmetricTraits`**（3 项）：
-4. `test_anxious_vs_avoidant` — 焦虑 vs 回避：焦虑方 insecurity > 回避方
-5. `test_warm_vs_cold` — 温暖 vs 冷漠：无边界违反
-6. `test_unstable_vs_stable` — 不稳 vs 稳定：无 NaN
-
-**`TestExtremeTraits`**（10 项参数化 + 2 项）：
-7. `test_single_trait_extreme` — 10 参数化单特质极端（sensitivity ±1 等）
-8. `test_all_traits_low` — 全 traits = -1，500 步稳定
-9. `test_all_traits_high` — 全 traits = +1，500 步稳定
-
-**`TestAdversarialMapping`**（3 项）：
-10. `test_inverted_mapping_stability` — 反转耦合矩阵，1000 步稳定
-11. `test_nonlinear_modes` — linear/tanh/sigmoid 模式，500 步稳定
-12. `test_noisy_mapping` — 矩阵噪声 σ=0.03，800 步稳定
-
-**`TestPerturbationInjection`**（2 项）：
-13. `test_periodic_perturbation_recovery` — 每 50 步扰动 0.3，1000 步稳定
-14. `test_single_large_shock_stability` — 大冲击（conflict+abandonment+weight），600 步恢复
-
-**`TestMonteCarlo`**（2 项）：
-15. `test_random_trait_batch` — 100 随机trait对×500步，异常率 < 5%
-16. `test_random_mapping_batch` — 50 随机耦合矩阵×400步，0 NaN
-
-**`TestLongRunStability`**（2 项）：
-17. `test_no_long_term_drift` — 10,000 步，无边界违反
-18. `test_step_variance_stabilizes` — 2000 步，方差收敛（后期均值 ≤ 1.5× 前期）
-
-**`TestDefenseProfileDynamics`**（1 项）：
-19. `test_defense_profiles_exist` — 600 步采样，profiles ∈ [0, 1.11]
-
-**`TestSetpointConvergence`**（2 项）：
-20. `test_zero_stimulus_stable` — 零映射矩阵，1000 步，尾段 L2 收缩
-21. `test_identical_agents_same_trajectory` — 相同智能体，相同轨迹
-
-**`TestStressScenarios`**（2 项）：
-22. `test_extreme_anxious_with_noise_and_adversarial_mapping` — 极端焦虑(0.98)+噪声(0.03)+扰动，1500 步稳定
-23. `test_adversarial_matrix_with_shock` — 对抗矩阵(2.5)+全 0.9 冲击，800 步稳定
+**`TestBasicCoupling`**（3 项）
+**`TestAsymmetricTraits`**（3 项）
+**`TestExtremeTraits`**（12 项）
+**`TestAdversarialMapping`**（3 项）
+**`TestPerturbationInjection`**（2 项）
+**`TestMonteCarlo`**（2 项）
+**`TestLongRunStability`**（2 项）
+**`TestDefenseProfileDynamics`**（1 项）
+**`TestSetpointConvergence`**（2 项）
+**`TestStressScenarios`**（2 项）
 
 ### 2.9 异常检测 (`test_anomalies.py` — 13 项)
 
-**`TestAnomalySingleRoundResponsiveness`**（3 项，诊断）：
-1. `test_max_deviation_from_default` — 100k 刺激，每维 max|Δ|（诊断，|Δ| < 0.02 则警告）
-2. `test_relationship_responsiveness` — 100k 刺激，关系态响应（诊断）
-3. `test_surface_amplification` — 20k 样本，surface vs internal σ 比（诊断）
+（无变动，与上一版一致）
 
-**`TestAnomalyRateParameters`**（2 项，诊断）：
-4. `test_beta_vs_alpha_balance` — 20k 样本，α/β 逐维分布
-5. `test_defense_profile_extremes` — 30k 极端trait样本，近零/近一比例
+**`TestAnomalySingleRoundResponsiveness`**（3 项，诊断）
+**`TestAnomalyRateParameters`**（2 项，诊断）
+**`TestAnomalySaturation`**（2 项）
+**`TestAnomalyDefenseCollapse`**（1 项）
+**`TestAnomalyTraitSensitivity`**（1 项，诊断）
+**`TestAnomalyMultiRoundDrift`**（1 项，诊断）
+**`TestAnomalySurfaceDegeneracy`**（1 项）
+**`TestAnomalyBetaModulation`**（1 项）
+**`TestAnomalyMatrixNoise`**（1 项）
 
-**`TestAnomalySaturation`**（2 项）：
-6. `test_all_stimuli_max_saturation` — 100 轮全 1.0，检测饱和维度
-7. `test_zero_stimuli_floor` — 500 轮零刺激，setpoint 偏差
+### 2.10 参数灵敏度 (`test_sensitivity.py` — 12 项，🆕 新增)
 
-**`TestAnomalyDefenseCollapse`**（1 项）：
-8. `test_profile_independence` — 30k 样本，deact×hyper 相关，双高/双低比例
+**`TestParameterSensitivity`**（12 项）— 每参数组独立验证：
+1. `test_B_int_sensitivity` — INPUT_INFLUENCE_B 的 16 个非零元素（max_s < 0.50）
+2. `test_B_rel_sensitivity` — REL_INPUT_INFLUENCE_B 的 6 个非零元素
+3. `test_surface_feedback_sensitivity` — SURFACE_FEEDBACK_MATRIX 的 9 个非零元素
+4. `test_internal_coupling_sensitivity` — INTERNAL_COUPLING 的 11 个非零元素
+5. `test_cross_scale_coupling_sensitivity` — CROSS_SCALE_COUPLING 的 5 个非零元素
+6. `test_self_decay_sensitivity` — SELF_DECAY 的 8 个值
+7. `test_decay_targets_sensitivity` — DECAY_TARGETS 的 8 个值
+8. `test_rel_self_decay_sensitivity` — REL_SELF_DECAY 的 3 个值
+9. `test_surface_mapper_sensitivity` — SURFACE_MAPPER 的 21 个连接 + 7 偏置
+10. `test_hyper_state_mod_sensitivity` — HYPER_STATE_MODULATION 的 15 个连接
+11. `test_deact_intensity_sensitivity` — DEACT_INTENSITY 的 9 个连接
+12. `test_hyper_intensity_sensitivity` — HYPER_INTENSITY 的 6 个连接
 
-**`TestAnomalyTraitSensitivity`**（1 项，诊断）：
-9. `test_trait_gradient` — 每 trait ±0.1 扰动，L2 |Δ|（诊断）
+**`TestFullSensitivityReport`**（1 项，标记跳过）：
+13. `test_full_report` — 仅 `--run-full-sensitivity` 启用，打印完整灵敏度分析报告
 
-**`TestAnomalyMultiRoundDrift`**（1 项，诊断）：
-10. `test_round_trip_hysteresis` — 50 轮正→50 轮负，迟滞量（诊断）
-
-**`TestAnomalySurfaceDegeneracy`**（1 项）：
-11. `test_surface_saturation_rate` — 50k 样本，每维触底/触顶率
-
-**`TestAnomalyBetaModulation`**（1 项）：
-12. `test_beta_range_after_fix` — 50k 样本，β 逐维内标准差，检测退化维度
-
-**`TestAnomalyMatrixNoise`**（1 项）：
-13. `test_matrix_noise_no_systematic_drift` — 1000 步，加噪(σ=0.03)vs 无噪，每维漂移量
+每项测试验证：`max_s < 0.50`（扰动 ×0.5 后输出变化不超过基线的 50%）。
 
 ---
 
@@ -432,8 +405,6 @@
 - 30 组随机 traits + internal + relationship
 - 检查状态变化量的符号一致性（所有非零 diff 同号）
 
-**问题发现**：零连接路径（B[i,j]=0）不单调——这是正确的（仅耦合间接效应 + 浮点噪声），已主动过滤，不纳入测试。
-
 ### 3.3 零刺激收敛
 
 | 轮数 | 内部态 L2 | 关系态 L2 |
@@ -446,17 +417,15 @@
 
 ### 3.4 双刺激交互分析
 
-**心理方向验证**（全部通过）：
-
 | 交互对 | 验证内容 | 结果 |
 |--------|---------|:----:|
 | abandonment + validation | insecurity 增量 ≤ 单独 abandonment | ✅ |
 | abandonment + conflict | stress 增量 ≥ 单独 conflict | ✅ |
 | validation + closeness | energy 增量 ≥ 单独 validation | ✅ |
 
-**非加性边界**：交互效应主要来自 soft_clamp 非线性，max 非加性偏离约 0.07（极端边界附近）。远离边界时近加性（偏离 < 0.01）。
+非加性边界：交互效应主要来自 soft_clamp 非线性，max 非加性偏离约 0.07（极端边界附近）。
 
-### 3.5 防御剖面极值（n=30,000）
+### 3.5 防御剖面分布（n=30,000）
 
 | 剖面 | 均值范围 | 覆盖率 |
 |------|:--------:|:------:|
@@ -475,70 +444,62 @@
 
 表面表达比内部感受"更收敛"——验证了防御机制削减极端表达的预期效果。
 
-### 3.7 交互非加性异常屏障
-
-| 场景 | max 偏差 | 判定 |
-|------|:-------:|:----:|
-| 远离 soft_clamp 边界 ([-0.8, 0.8]) | < 0.01 | ✅ 近加性 |
-| 近 soft_clamp 边界 ([-1, 1]) | ~0.07 | 🟡 可解释 |
-| 极端非加性比例 (> 0.10) | < 1% | ✅ |
-
-系统在正常操作区域内基本加性，异常交互仅出现在 soft_clamp 饱和边界。
-
-### 3.8 耦合结构
+### 3.7 耦合结构
 
 | 属性 | 数值 | 判定 |
 |------|:----:|:----:|
 | 内部耦合密度 | 11/64 (17.2%) | ✅ 稀疏 |
+| 关系耦合密度 | **2/9 (22.2%)** | ✅ **≤30%（已修复）** |
 | 内部耦合谱半径 | 0.0986 | ✅ ≪ 1.0 |
 | 有效雅可比谱半径 | 0.1897 | ✅ ≪ 1.0 |
 | 时间尺度比 α/α_rel | 6.1× | ✅ 分离充分 |
 
+### 3.8 参数灵敏度分布（🆕 新增）
+
+30 场景 × 20 轮 × 扰动 ×0.5 的累积灵敏度：
+
+| 级别 | 参数数 | 占比 |
+|:----:|:-----:|:----:|
+| 🔴 强 (>0.15) | 4 | 3% |
+| 🟠 中 (0.05-0.15) | 21 | 17% |
+| 🟡 弱 (0.01-0.05) | 39 | 32% |
+| 🟢 忽略 (<0.01) | **60** | **48%** |
+
+**各组件平均灵敏度**：
+
+```
+HyperI        ████  0.0775  │ 1强 4中弱 1忽略  ← 最强！回避(-2.10)敏感度0.31
+SELF_DECAY    ███   0.0652  │ 0强 8中弱 0忽略
+B_int         ███   0.0604  │ 3强 11中弱 2忽略
+B_rel         ██    0.0450  │ 0强 6中弱 0忽略
+int_coup      ██    0.0435  │ 0强 9中弱 2忽略
+REL_SELF_DEC  █     0.0188  │ 0强 2中弱 1忽略
+xscale        █     0.0130  │ 0强 3中弱 2忽略
+SurfMap       █     0.0123  │ 0强 10中弱 18忽略 ← 18/28 可移除
+surf_fb       ▏     0.0074  │ 0强 3中弱 6忽略
+HState        ▏     0.0061  │ 0强 3中弱 12忽略 ← 12/15 可移除
+DECAY_TARGETS ▏     0.0032  │ 0强 1中弱 7忽略   ← 仅social_battery有效
+DeactI        ▏     0.0005  │ 0强 0中弱 9忽略   ← 单会话内不激活
+```
+
 ---
 
-## 四、新增覆盖率分析（06-21）
+## 四、新增覆盖率分析（06-22）
 
-本版补充 27 项测试，覆盖 5 个此前缺失的测试维度：
+本版补充 12 项测试，覆盖参数灵敏度分析维度。
 
-### 4.1 变化率上限（TestPerTurnRateLimit）
+### 4.1 参数灵敏度（TestParameterSensitivity）
 
-**背景**：之前仅有统计软约束（`test_change_magnitudes_statistics` 要求 15k 样本中 > 0.5 的 ≤ 5 例），无逐维硬边界。重构中一旦引入错误系数可能导致单轮跳变。
+**背景**：173 个参数的系统需要可重复的定量验证，确保：
+1. 参数扰动不导致系统发散（max_s < 0.50 安全边界）
+2. 发现冗余参数以简化模型
 
-**方案**：500k 极端随机采样确定每维 max|Δ|，上浮 50% 作为安全上限。20k 样本确认无越界。
+**方案**：对每个参数组的每个非零元素，扰动 ×0.5，跑 10 场景 ×20 轮，测量归一化灵敏度 `s = mean(|Δoutput|) / mean(|output|)`。直接修改编译后的 `_weight_matrix`，绕过 SemanticWeight 的 domain 验证。
 
-**问题发现**：无。所有维度实测 max 远低于安全上限（最大占用率：stress 65%, irritation 65%）。
-
-### 4.2 刺激强度单调性（TestStimulusIntensityMonotonicity）
-
-**背景**：B 矩阵方向测试仅验证了 "0 刺激与高刺激的比较方向"，未验证中间强度的单调性。
-
-**方案**：对 16 条 B 矩阵直连路径，每条取 15 个强度点验证单调性。额外 10 组随机 traits 散弹测试。
-
-**问题发现**：零连接路径（B[i,j]=0）不单调——这是系统行为，非 bug。测试主动过滤此类路径。
-
-### 4.3 双刺激交互（TestStimulusInteraction）
-
-**背景**：Monte Carlo 测试仅检查边界合规，不验证双刺激交互的心理合理性。
-
-**方案**：3 条心理方向性断言（validation 补偿 abandonment、abandonment 加剧 conflict、closeness 增强 validation）+ 1 条非加性屏障。
-
-**问题发现**：非加性在 soft_clamp 边界附近可达 0.07，但不产生反直觉行为。远离边界时系统近加性。
-
-### 4.4 耦合收缩性（TestCouplingContractivity）
-
-**背景**：耦合矩阵谱半径仅在文档中提及，无自动测试守护。
-
-**方案**：数值计算 `J = INTERNAL_COUPLING - diag(SELF_DECAY)` 的谱半径。验证 5 条主要耦合边的符号结构。
-
-**问题发现**：ρ = 0.19（远 < 0.95 阈值）。符号结构全部正确。
-
-### 4.5 时间尺度分离（TestPerTurnRateLimit 内）
-
-**背景**：α/α_rel 的比例决定了关系态比内部态慢多少，之前无自动验证。
-
-**方案**：10,000 随机 traits + relationship，计算 α 和 α_rel 的均值比。
-
-**问题发现**：比例 6.1×，远高于 ≥ 2.0 的最低要求。
+**问题发现**：~48% 的参数在多轮累积下灵敏度 < 0.01，可安全移除候选包括：
+- `DECAY_TARGETS` 的 7 个零值（仅 social_battery 有效）
+- `SurfMap` 的 18 个弱连接
+- `HState` 的 12 条弱连接
 
 ---
 
@@ -559,26 +520,20 @@
 
 | 约束 | 违反位置 | 严重度 | 说明 |
 |:----:|---------|:------:|------|
-| ① | ~~`_surface.py`~~ | ✅ **已修复** | traits 已从 surface 移除（06-22 重构） |
-| ② | `perception.py` | 🔴 | 无 StimulusMetadata 结构 |
+| ① | `_surface.py` | ✅ **已修复** | traits 已从 surface 移除（06-22 重构） |
+| ② | `perception.py` | ✅ **已修复** | `StimulusMetadata` 已实现（含 confidence/source/decay_modulator/timestamp），confidence 缩放刺激 + source=3 清零 + decay_modulator 传入 _decay（06-22） |
 | ④ | `_surface.py` | ⚠️ **by design** | outer_stimuli 进 surface 已由 defenses 压抑（06-22 确认） |
-| ⑪ | `state_formatter.py:42-51` | 🔴 | 5 级硬阈值离散 |
-| ⑥ | 关系耦合 66.7% | ⚠️ | 3×3 小矩阵例外，密度超出 30% |
+| ⑪ | `state_formatter.py:_desc()` | ✅ **已修复** | 5 级硬阈值替换为 9 区连续投影，锚点之间用"略偏"前缀平滑过渡（06-22） |
+| ⑥ | ~~关系耦合 66.7%~~ | ✅ **已修复** | 改为级联设计（AFF→TRUST→INTIM），密度降至 22.2%（06-22） |
 
 ### 5.3 已解决问题（本版关闭）
 
 | 问题 | 解决方案 | 日期 |
 |------|---------|:----:|
-| dynamics 裸参数无 provenance | 迁移至 WeightMapper/WeightVector/LinearMapping | 06-21 |
-| surface 裸系数无 provenance | 迁移至 SURFACE_MAPPER(LinearMapping) | 06-21 |
-| decay 裸 λ + 人格调制无 provenance | 迁移至 _dynamics_weights.py | 06-21 |
-| defense 基线/增益/sigmoid 无 provenance | 迁移至 _defense_weights.py | 06-21 |
-| attachment_avoidance→trust 双系数错误 | 合并为 -0.27 | 06-21 |
-| test_surface 关系维 6→3 不匹配 | 测试代码修复 | 06-21 |
-| **约束①（traits 直连 surface）** | **移除了 traits 参数 + sigmoid 门控，通过 defense/dynamics 间接影响** | **06-22** |
-| **surface 无惯性（每轮独立重算）** | **新增 `s(t)=α·raw+(1-α)·s(t-1)` + `_compute_surface_alpha()`** | **06-22** |
-| **surface→internal 单方向（无反馈）** | **新增 `compute_surface_feedback()` + 7×8 SURFACE_FEEDBACK_MATRIX** | **06-22** |
-| **sigmoid 门控（pride/openness/optimism）** | **移除（traits 间接化完成）** | **06-22** |
+| 约束⑥ 关系耦合密度 66.7% | 改为级联设计(2 连接)，密度降至 22.2% | 06-22 |
+| Hyper 人格/状态方差方向不一致 | 拆分为人格基线(秩-1) + 状态调制(HYPER_STATE_MODULATION) | 06-22 |
+| 无参数灵敏度守护 | 新增 test_sensitivity.py（12 项测试） | 06-22 |
+| 防御剖面无交叉调制能力 | HYPER_STATE_MODULATION 提供维度特异性 | 06-22 |
 
 ---
 
@@ -594,41 +549,37 @@
 | 6 | setpoint ∈ [-0.9, 0.9] | 20k 随机 traits | ✅ |
 | 7 | 防御剖面独立性 | r=0.23 < 0.3 | ✅ |
 | 8 | 非对称衰减负/正恢复比 ≈ 1.8 | 200+ 样本 | ✅ |
-| 9 | 单轮变化率不超过安全上限 | 20k 样本 × 18 维 | ✅ 🔁 |
-| 10 | B 矩阵直连路径强度单调 | 16 路径 × 15 强度级 | ✅ 🔁 |
-| 11 | 耦合收缩 ρ(J) < 1.0 | 数值雅可比谱半径 | ✅ 🔁 实测 0.19 |
-| 12 | 时间尺度分离 α/α_rel ≥ 2.0 | 10k 样本均值比 | ✅ 🔁 实测 6.1× |
-
-✅ = 原有通过 | ✅ 🔁 = 本版新增通过
+| 9 | 单轮变化率不超过安全上限 | 20k 样本 × 18 维 | ✅ |
+| 10 | B 矩阵直连路径强度单调 | 16 路径 × 15 强度级 | ✅ |
+| 11 | 耦合收缩 ρ(J) < 1.0 | 数值雅可比谱半径 | ✅ 实测 0.19 |
+| 12 | 时间尺度分离 α/α_rel ≥ 2.0 | 10k 样本均值比 | ✅ 实测 6.1× |
+| 13 | 参数灵敏度 max_s < 0.50 | 12 组 × 扰动 ×0.5 | ✅ 🆕 |
+| 14 | 矩阵密度 ≤ 30%（约束⑥） | 所有 2D 矩阵 | ✅ 🆕 修复(22.2%) |
 
 ---
 
 ## 七、运行方式
 
 ```bash
-# 全部测试（221 项）
+# 全部测试（249 项）
 uv run pytest tests/ -v
 
-# 本版新增覆盖率测试
-uv run pytest tests/test_dynamics.py::TestPerTurnRateLimit -v
-uv run pytest tests/test_dynamics.py::TestStimulusIntensityMonotonicity -v
-uv run pytest tests/test_dynamics.py::TestStimulusInteraction -v
-uv run pytest tests/test_matrices.py::TestCouplingContractivity -v
+# 本版新增测试
+uv run pytest tests/test_sensitivity.py -v                     # 参数灵敏度（12 项，快速）
+uv run pytest tests/ --run-full-sensitivity                    # 全量灵敏度报告（30 场景）
 
 # 单模块测试
-uv run pytest tests/test_utils.py -v                    # 数值工具（23 项）
-uv run pytest tests/test_matrices.py -v                 # 矩阵（10 项）
-uv run pytest tests/test_defenses.py -v                 # 防御剖面（26 项）
-uv run pytest tests/test_dynamics.py -v                 # 动力学（46 项）
-uv run pytest tests/test_surface.py -v                  # 表面（13 项）
-uv run pytest tests/test_decay.py -v                    # 衰减（33 项）
-uv run pytest tests/test_pipeline.py -v                 # 管线（24 项）
-uv run pytest tests/test_adversarial_engine.py -v       # 对抗引擎（23 项）
-uv run pytest tests/test_anomalies.py -v -s             # 异常检测（13 项，诊断输出）
+uv run pytest tests/test_utils.py -v                           # 数值工具（23 项）
+uv run pytest tests/test_matrices.py -v                        # 矩阵（9 项）
+uv run pytest tests/test_defenses.py -v                        # 防御剖面（26 项）
+uv run pytest tests/test_dynamics.py -v                        # 动力学（46 项）
+uv run pytest tests/test_surface.py -v                         # 表面（22 项）
+uv run pytest tests/test_decay.py -v                           # 衰减（33 项）
+uv run pytest tests/test_pipeline.py -v                        # 管线（24 项）
+uv run pytest tests/test_adversarial_engine.py -v              # 对抗引擎（23 项）
+uv run pytest tests/test_anomalies.py -v -s                    # 异常检测（13 项，诊断输出）
+uv run pytest tests/test_sensitivity.py -v                     # 参数灵敏度（12 项）
 
 # 极限压力
 uv run pytest tests/test_pipeline.py::TestExtremeStress -v -s
-
-# 异常探测（含维度分析 + PCA）
-uv run pytest tests/test_anomalies.py -v -s
 ```

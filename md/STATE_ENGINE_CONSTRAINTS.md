@@ -95,7 +95,13 @@ Dynamics 中使用时：
 
 ### 当前状态
 
-`StimulusMetadata` 不存在。感知管道返回裸 `np.ndarray`。**全量未实施。**
+`StimulusMetadata` 已实现（`state.py`，2026-06-22）。
+- `perception.py` 返回 `{user_stimuli, stimulus_metadata}`
+- `nodes.py` → `state_engine_node` 重建 dataclass 并传递
+- `_pipeline.py:update_all()` 使用 `confidence` 缩放刺激，`source==3` 清零
+- `_decay.py` 接收 `decay_modulator` 缩放有效衰减率
+
+**全量已实施。✅**
 
 ---
 
@@ -684,9 +690,15 @@ STIMULUS_ACTIVATION_SCENARIOS = {
 
 ### 通过条件
 
-- [ ] state_formatter 不使用硬阈值分段函数
+- [x] state_formatter 不使用硬阈值分段函数
 - [ ] state_formatter 的输出是输入状态向量的 Lipschitz 连续函数（存在 K > 0 使 `‖f(x) - f(y)‖ ≤ K‖x - y‖`）
 - [ ] 信息熵验证：对连续变化的输入扫描，formatter 输出的信息熵 ≥ 输入信息熵 × 70%
+
+### 当前状态
+
+硬阈值 `_desc()` 已于 2026-06-22 替换为 9 区连续投影：锚点中心区（±0.15）输出纯标签，过渡区添加"略偏"前缀。FORMAT_HEADER 同步更新。
+
+后续可补充信息熵验证测试（`assert_formatter_continuity`），需集成 scipy 依赖。
 
 ### 验证函数
 

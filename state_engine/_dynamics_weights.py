@@ -151,36 +151,41 @@ def _build_internal_coupling() -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════════
 
 def _build_relationship_coupling() -> np.ndarray:
-    """关系耦合（6 条规则：4 正 + 2 负拮抗）。"""
+    """关系耦合（2 条规则，22.2% 密度 ✅ ≤30%）—— 级联设计。
+
+    约束⑥正交稀疏要求 ≤30%。3×3 矩阵 9 个格子中最多 2-3 个非零。
+    采用级联设计取代原双向全连接：
+
+      R_AFFECTION ──(+0.10)──→ R_TRUST_BOND ──(+0.08)──→ R_INTIMACY
+
+    设计理由:
+      AFFECTION → TRUST: 好感是信任的基础（权重 0.10，原 0.08 上调补偿）
+      TRUST → INTIMACY:  信任打开亲密（权重 0.08，原 0.04 上调补偿）
+
+    移除的连接（及其替代路径）:
+      TRUST → AFFECTION: 信任对好感的回馈通过 B_rel（validation/closeness 刺激间接达成）
+      AFFECTION → INTIMACY: 亲密不直接从好感跳转，需信任中介（级联设计）
+      INTIMACY → AFFECTION/TRUST (拮抗): 亲密张力对好感和信任的负作用太小（-0.02），
+        在满足稀疏约束时优先牺牲。亲密度的自然回落由时间衰减（REL_SELF_DECAY）处理。
+    """
     mapper = WeightMapper(
         "RELATIONSHIP_COUPLING",
         source_labels=R_LABELS, target_labels=R_LABELS,
-        description="关系态→关系态耦合（3×3）",
+        description="关系态→关系态耦合（3×3，级联设计，22.2%密度）",
     )
     # 好感→信任↑
-    mapper.connect(R_AFFECTION, R_TRUST_BOND, 0.08, "trace", (0.03, 0.14),
-                   "好感构建信任感", "theory", "2026-06-21")
-    # 信任→好感↑（安全基地效应）
-    mapper.connect(R_TRUST_BOND, R_AFFECTION, 0.04, "trace", (0.01, 0.08),
-                   "安全基地效应：信任让人更亲近", "theory", "2026-06-21")
-    # 好感→亲密↑
-    mapper.connect(R_AFFECTION, R_INTIMACY, 0.035, "trace", (0.01, 0.07),
-                   "喜欢让人想靠近", "theory", "2026-06-21")
+    mapper.connect(R_AFFECTION, R_TRUST_BOND, 0.10, "trace", (0.05, 0.16),
+                   "好感构建信任——级联起点（原0.08上调补偿移除路径）",
+                   "calibrated", "2026-06-22")
     # 信任→亲密↑
-    mapper.connect(R_TRUST_BOND, R_INTIMACY, 0.04, "trace", (0.01, 0.08),
-                   "信任允许深入", "theory", "2026-06-21")
-    # 亲密→信任↓（拮抗负边）
-    mapper.connect(R_INTIMACY, R_TRUST_BOND, -0.02, "trace", (-0.05, -0.01),
-                   "过度亲密→安全感下降（拮抗）", "theory", "2026-06-21")
-    # 亲密→好感↓（拮抗负边）
-    mapper.connect(R_INTIMACY, R_AFFECTION, -0.02, "trace", (-0.05, -0.01),
-                   "张力过载→伤好感（拮抗）", "theory", "2026-06-21")
+    mapper.connect(R_TRUST_BOND, R_INTIMACY, 0.08, "trace", (0.04, 0.14),
+                   "信任允许深入——级联终点（原0.04上调补偿移除路径）",
+                   "calibrated", "2026-06-22")
 
     M = mapper.build_matrix(
         (R_SIZE, R_SIZE),
-        skip_sparsity=True,
-        skip_orthogonality=True,
         skip_spectral=True,
+        skip_orthogonality=True,
     )
     register_mapper(mapper)
     return M

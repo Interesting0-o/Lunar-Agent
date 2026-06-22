@@ -216,6 +216,56 @@ def stimuli_from_dict(d: dict) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════
+# StimulusMetadata — 刺激元属性（约束②）
+# ═══════════════════════════════════════════════════════════════
+
+from dataclasses import dataclass
+import time as _time
+
+
+@dataclass
+class StimulusMetadata:
+    """刺激向量元属性结构，携带每维度置信度、来源和衰减调节因子。
+
+    约束②要求所有刺激必须附带此结构：
+      - confidence: 每维度置信度，低置信度产生更小的状态变化
+      - source: 来源编码 {0=observed, 1=inferred, 2=default, 3=missing}
+      - decay_modulator: 每维度衰减调节因子
+      - timestamp: 感知时间戳
+
+    Dynamics 中使用时:
+      - β·Δ_stimulus 必须乘以 confidence
+      - source[d]==3(missing) 的维度不参与更新
+      - decay_modulator 传递给 _decay.py
+    """
+    confidence: np.ndarray            # (7,) [0,1] 每维度置信度
+    source: np.ndarray                # (7,) 来源编码: 0=observed, 1=inferred, 2=default, 3=missing
+    decay_modulator: np.ndarray       # (7,) [0,1] 每维度衰减调节因子
+    timestamp: float                  # 感知时间戳
+
+    @staticmethod
+    def from_default() -> "StimulusMetadata":
+        """创建默认元数据：全 observed、高置信度、无衰减调制。"""
+        return StimulusMetadata(
+            confidence=np.full(ST_SIZE, 0.85, dtype=np.float64),
+            source=np.zeros(ST_SIZE, dtype=np.int8),
+            decay_modulator=np.ones(ST_SIZE, dtype=np.float64),
+            timestamp=_time.time(),
+        )
+
+    @staticmethod
+    def with_confidence(confidence_level: float) -> "StimulusMetadata":
+        """按置信度等级创建元数据。"""
+        c = np.clip(confidence_level, 0.0, 1.0)
+        return StimulusMetadata(
+            confidence=np.full(ST_SIZE, c, dtype=np.float64),
+            source=np.zeros(ST_SIZE, dtype=np.int8),
+            decay_modulator=np.ones(ST_SIZE, dtype=np.float64),
+            timestamp=_time.time(),
+        )
+
+
+# ═══════════════════════════════════════════════════════════════
 # State — 顶层状态聚合（保留 TypedDict）
 # ═══════════════════════════════════════════════════════════════
 
@@ -223,7 +273,7 @@ def stimuli_from_dict(d: dict) -> np.ndarray:
 class State(TypedDict):
     """顶层状态——聚合所有子状态，作为图节点的消息传递载体。"""
     messages: Annotated[List, add_messages]
-    memory_id:str
+    memory_id: str
 
     # ── 角色自身的内部状态（所有层级） ──
     surface_state: Optional[_Array]
@@ -234,6 +284,7 @@ class State(TypedDict):
 
     # ── 感知节点输出（perception_node 写入，state_engine_node 消费后置为 None） ──
     user_stimuli: Optional[_Array]
+    stimulus_metadata: Optional[dict]  # StimulusMetadata 的 JSON 兼容表示
 
     # ── 状态格式化输出（state_formatter_node 写入，llm_node 消费） ──
     state_description: Optional[str]

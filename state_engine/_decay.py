@@ -18,6 +18,7 @@
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
 import numpy as np
 from state import I_SIZE, R_SIZE
 from ._dynamics import compute_setpoint, compute_rel_setpoint
@@ -117,6 +118,7 @@ def apply_time_decay_internal(
     traits: np.ndarray,
     delta_hours: float,
     config: DecayConfig = DEFAULT_DECAY_CONFIG,
+    decay_modulator: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """对内部状态应用时间衰减。
 
@@ -126,6 +128,9 @@ def apply_time_decay_internal(
         traits: 人格特质 (10,)
         delta_hours: 自上次更新以来的实际时间 (小时)
         config: 衰减参数配置
+        decay_modulator: 刺激衰减调制因子 (7,) [0,1]，约束②参数。
+                         值<1 减慢衰减（情绪冲击残留），>1 加速恢复。
+                         未提供时无影响。
 
     Returns:
         衰减后的内部状态 (8,)
@@ -138,6 +143,12 @@ def apply_time_decay_internal(
         config.internal_lambda, p_mod, delta_hours,
         config.internal_time_curve_k,
     )
+
+    # 约束②：decay_modulator → 缩放有效衰减率
+    # 将 (7,) 刺激级调制映射到 (8,) 状态级：取均值
+    if decay_modulator is not None:
+        mod = float(np.clip(np.mean(decay_modulator), 0.1, 2.0))
+        lam = lam * mod
 
     # 核心衰减公式
     deviation = current - setpoint
@@ -153,6 +164,7 @@ def apply_time_decay_relationship(
     traits: np.ndarray,
     delta_hours: float,
     config: DecayConfig = DEFAULT_DECAY_CONFIG,
+    decay_modulator: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """对关系状态应用时间衰减。
 
@@ -162,6 +174,7 @@ def apply_time_decay_relationship(
         traits: 人格特质 (10,)
         delta_hours: 自上次更新以来的实际时间 (小时)
         config: 衰减参数配置
+        decay_modulator: 刺激衰减调制因子 (7,) [0,1]，约束②参数。
 
     Returns:
         衰减后的关系状态 (3,)
@@ -174,6 +187,11 @@ def apply_time_decay_relationship(
         config.relationship_lambda, p_mod, delta_hours,
         config.relationship_time_curve_k,
     )
+
+    # 约束②：decay_modulator → 缩放有效衰减率
+    if decay_modulator is not None:
+        mod = float(np.clip(np.mean(decay_modulator), 0.1, 2.0))
+        lam = lam * mod
 
     deviation = current - setpoint
 
@@ -193,6 +211,7 @@ def apply_time_decay(
     traits: np.ndarray,
     delta_hours: float,
     config: DecayConfig = DEFAULT_DECAY_CONFIG,
+    decay_modulator: Optional[np.ndarray] = None,
 ) -> dict:
     """对内部和关系状态同时应用时间衰减（便捷接口）。
 
@@ -205,6 +224,7 @@ def apply_time_decay(
         traits: 人格特质 (10,)
         delta_hours: 自上次更新以来的实际时间 (小时)
         config: 衰减参数配置
+        decay_modulator: 刺激衰减调制因子 (7,) [0,1]，约束②参数。
 
     Returns:
         {"internal_state": (8,), "relationship_state": (3,)}
@@ -215,8 +235,10 @@ def apply_time_decay(
     return {
         "internal_state": apply_time_decay_internal(
             current_internal, internal_sp, traits, delta_hours, config,
+            decay_modulator=decay_modulator,
         ),
         "relationship_state": apply_time_decay_relationship(
             current_relationship, rel_sp, traits, delta_hours, config,
+            decay_modulator=decay_modulator,
         ),
     }

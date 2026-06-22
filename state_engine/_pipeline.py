@@ -15,7 +15,7 @@
 
 from typing import Optional
 import numpy as np
-from state import ST_SIZE
+from state import ST_SIZE, StimulusMetadata
 from ._defenses import compute_defense_profiles, apply_defenses
 from ._dynamics import (
     update_internal_state,
@@ -47,6 +47,7 @@ def update_all(
     traits: np.ndarray,
     stimuli: np.ndarray,
     prev_surface: Optional[np.ndarray] = None,
+    stimulus_metadata: Optional[StimulusMetadata] = None,
 ) -> dict:
     """State Engine 主入口：4 步管线。
 
@@ -63,12 +64,19 @@ def update_all(
         traits: 人格特质 (10,)
         stimuli: 原始心理刺激 (7,)
         prev_surface: 前一帧表面状态 (7,)，None 表示首帧
+        stimulus_metadata: 刺激元属性（约束②），含置信度/来源/衰减因子
 
     Returns:
         {"internal_state": (8,), "relationship_state": (3,), "surface_state": (7,)}
     """
     if current_internal is None:
         return initialize_all(traits)
+
+    # 约束②：应用刺激元属性 — 置信度缩放 + missing 维度清零
+    if stimulus_metadata is not None:
+        stimuli = stimuli * stimulus_metadata.confidence
+        missing_mask = stimulus_metadata.source == 3
+        stimuli[missing_mask] = 0.0
 
     # ① 防御剖面 → inner / outer
     profiles = compute_defense_profiles(traits, current_relationship, current_internal)

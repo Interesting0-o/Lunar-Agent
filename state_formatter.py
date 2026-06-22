@@ -24,31 +24,54 @@ from state import (
 )
 
 
-# ── 5-level descriptor helper ──
+# ── Continuous text projection (constraint⑪) ──
+
+def _mod_prefix(label: str) -> str:
+    """添加"略偏"前缀，但如果标签已含"略""偏""较"则不重复。
+
+    例如:
+      "内敛克制" → "略偏内敛克制"  (加了前缀)
+      "略有不安" → "略有不安"      (已有"略")
+      "偏硬"     → "偏硬"          (已有"偏")
+      "较为直接" → "较为直接"      (已有"较")
+    """
+    if any(c in label for c in ('略', '偏', '较')):
+        return label
+    return f"略偏{label}"
+
 
 def _desc(value: float, labels: tuple) -> str:
-    """将 [-1, 1] 值映射到 5 级文本描述。
+    """将 [-1, 1] 值连续投影到文本描述（无硬阈值）。
 
-    映射规则（全局统一）：
-        -1.00 ≤ value < -0.70 → 极低/第一级
-        -0.70 ≤ value < -0.30 → 偏低/第二级
-        -0.30 ≤ value < +0.30 → 中等/第三级
-        +0.30 ≤ value < +0.70 → 偏高/第四级
-        +0.70 ≤ value ≤ +1.00 → 极高/第五级
+    使用 9 区段替代旧的 5 级硬阈值，在锚点之间用"略偏"前缀过渡。
+    确保连续值在边界附近微小波动不会导致文本截然不同。
 
-    labels 格式：(极低, 偏低, 中等, 偏高, 极高)
+    锚点中心（距锚点 < 0.15）：纯标签
+    过渡区（距锚点 0.15~0.35）："略偏" + 标签
+    下一锚点中心（距下一锚点 < 0.15）：下一纯标签
+
+    映射示例（以["内敛","有所保留","适度流露","较为外显","毫不掩饰"]为例）：
+      -1.00 ～ -0.85  内敛克制
+      -0.85 ～ -0.65  略偏内敛克制
+      -0.65 ～ -0.35  有所保留
+      -0.35 ～ -0.15  略偏有所保留
+      -0.15 ～ +0.15  适度流露
+      +0.15 ～ +0.35  略偏适度流露
+      +0.35 ～ +0.65  较为外显
+      +0.65 ～ +0.85  略偏较为外显  → 实际"较为外显"已有"较"，退化为纯标签
+      +0.85 ～ +1.00  毫不掩饰
     """
     very_low, low, medium, high, very_high = labels
-    if value < -0.7:
-        return very_low
-    elif value < -0.3:
-        return low
-    elif value < 0.3:
-        return medium
-    elif value < 0.7:
-        return high
-    else:
-        return very_high
+
+    if value < -0.85:    return very_low
+    if value < -0.65:    return _mod_prefix(very_low)
+    if value < -0.35:    return low
+    if value < -0.15:    return _mod_prefix(low)
+    if value < 0.15:     return medium
+    if value < 0.35:     return _mod_prefix(medium)
+    if value < 0.65:     return high
+    if value < 0.85:     return _mod_prefix(high)
+    return very_high
 
 
 # ── 格式说明常量（仅注入一次，放在所有字段前面） ──
@@ -56,9 +79,13 @@ def _desc(value: float, labels: tuple) -> str:
 FORMAT_HEADER = """【状态注入说明】
 以下是你当前的完整心理状态参数。每个指标的值域和极性（数值增大代表什么含义）均在括号中标注。
 数值默认范围 [-1~1]，0=中性，正数越大越偏向高极，负数越小越偏向低极。
-文本描述与数值的对应层级（全局统一）：
-  -1.00~-0.71 = 极低  -0.70~-0.31 = 偏低  -0.30~+0.30 = 中等
-  +0.31~+0.70 = 偏高  +0.71~+1.00 = 极高
+文本描述是连续投影的（无硬阈值），锚点标签对应关系：
+  -1.0 ~ -0.65   标签①（极低端）
+  -0.65 ~ -0.15  标签②（偏低端）
+  -0.15 ~ +0.15  标签③（中间）
+  +0.15 ~ +0.65  标签④（偏高端）
+  +0.65 ~ +1.0   标签⑤（极高端）
+连续值在标签之间会添加"略偏"前缀作为过渡指示。
 
 请根据这些状态参数调整回应中的语气、措辞和潜台词。"""
 

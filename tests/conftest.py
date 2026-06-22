@@ -2,6 +2,18 @@
 
 import numpy as np
 import pytest
+
+
+def pytest_addoption(parser):
+    """Register optional flags for sensitivity analysis and other heavy tests."""
+    parser.addoption(
+        "--run-full-sensitivity",
+        action="store_true",
+        default=False,
+        help="Run full sensitivity analysis (30 scenarios) and print report.",
+    )
+
+
 from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,

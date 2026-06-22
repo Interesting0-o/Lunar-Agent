@@ -6,7 +6,8 @@ perception —— 感知节点工具集
 
 perception_node 的输出格式：
   {
-    "user_stimuli": np.ndarray,  # 7 维 StimulusVector 数组
+    "user_stimuli": np.ndarray,     # 7 维 StimulusVector 数组
+    "stimulus_metadata": dict,      # StimulusMetadata 的 JSON 兼容表示（约束②）
   }
 """
 
@@ -17,7 +18,7 @@ from prompts import PERCEPTION_SYSTEM_PROMPT
 from typing import Optional
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
 from llm import perception_model
-from state import ST_LABELS, stimuli_from_dict
+from state import ST_LABELS, stimuli_from_dict, StimulusMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +82,31 @@ def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
 
             if validate_perception_result(data):
                 # 将模型输出的键值对字典转换为 numpy 数组
+                stimuli_array = stimuli_from_dict(data["user_stimuli"])
+
+                # 构建 StimulusMetadata（约束②）
+                confidence = _compute_confidence(attempt, max_attempts)
+                # 低置信度时，按维度幅度微调：极端值（≈0或1）的置信度略降
+                # 因为 LLM 在打极端分时更不可靠
+                per_dim_confidence = np.full(ST_SIZE, confidence, dtype=np.float64)
+                extreme_mask = (stimuli_array < 0.05) | (stimuli_array > 0.95)
+                per_dim_confidence[extreme_mask] *= 0.85  # 极端值再降15%
+
+                metadata = StimulusMetadata(
+                    confidence=per_dim_confidence,
+                    source=np.zeros(ST_SIZE, dtype=np.int8),
+                    decay_modulator=np.ones(ST_SIZE, dtype=np.float64),
+                    timestamp=raw.response_metadata.get("created", None) if hasattr(raw, "response_metadata") else None,
+                )
+
                 return {
-                    "user_stimuli": stimuli_from_dict(data["user_stimuli"]),
+                    "user_stimuli": stimuli_array,
+                    "stimulus_metadata": {
+                        "confidence": metadata.confidence.tolist(),
+                        "source": metadata.source.tolist(),
+                        "decay_modulator": metadata.decay_modulator.tolist(),
+                        "timestamp": metadata.timestamp or __import__("time").time(),
+                    },
                 }
 
             last_error = (
@@ -95,3 +119,21 @@ def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
 
     logger.error("perception 全部 %d 次尝试失败，跳过本轮。最后错误: %s", max_attempts, last_error)
     return None
+
+
+def _compute_confidence(attempt: int, max_attempts: int) -> float:
+    """根据重试次数计算感知置信度。
+
+    第 0 次尝试（首次成功）→ 0.90
+    第 1 次重试成功    → 0.70
+    第 2+ 次重试成功   → 0.50
+
+    这反映一个直觉：LLM 第一次就能正确提取时最可信，
+    需要多次重试才成功意味着输入模糊或模型不确定。
+    """
+    if attempt == 0:
+        return 0.90
+    elif attempt == 1:
+        return 0.70
+    else:
+        return 0.50
