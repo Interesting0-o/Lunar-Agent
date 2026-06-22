@@ -15,7 +15,7 @@
 
 from typing import Optional
 import numpy as np
-from state import ST_SIZE
+from state import ST_SIZE, StimulusMetadata
 from ._defenses import compute_defense_profiles, apply_defenses
 from ._dynamics import (
     update_internal_state,
@@ -23,7 +23,8 @@ from ._dynamics import (
     compute_setpoint,
     compute_rel_setpoint,
 )
-from ._surface import project_surface
+from ._surface import project_surface, compute_surface_feedback
+from ._utils import soft_clamp
 
 
 def initialize_all(traits: np.ndarray) -> dict:
@@ -31,7 +32,7 @@ def initialize_all(traits: np.ndarray) -> dict:
     internal = compute_setpoint(traits)
     relationship = compute_rel_setpoint(traits)
     outer_zero = np.zeros(ST_SIZE, dtype=np.float64)
-    surface = project_surface(internal, relationship, traits, outer_zero)
+    surface = project_surface(internal, relationship, outer_zero, prev_surface=None)
 
     return {
         "internal_state": internal,
@@ -45,26 +46,37 @@ def update_all(
     current_relationship: Optional[np.ndarray],
     traits: np.ndarray,
     stimuli: np.ndarray,
+    prev_surface: Optional[np.ndarray] = None,
+    stimulus_metadata: Optional[StimulusMetadata] = None,
 ) -> dict:
-    """State Engine 主入口：3 步管线。
+    """State Engine 主入口：4 步管线。
 
     步骤:
       ① 防御剖面 → (inner_stimuli, outer_stimuli)
          deactivation 控制 outer 削减，hyperactivation 控制 inner 放大
       ② 残差动力学（内部 + 关系，含内建稳态恢复）
-      ③ 表面投影
+      ③ 表面投影（带惯性混合）
+      ④ 表面→内部反馈（情绪失调成本 + 面部反馈 + 表达消耗）
 
     Args:
         current_internal: 当前内部状态 h_{t-1} (8,) 或 None
-        current_relationship: 当前关系状态 r_{t-1} (6,) 或 None
+        current_relationship: 当前关系状态 r_{t-1} (3,) 或 None
         traits: 人格特质 (10,)
         stimuli: 原始心理刺激 (7,)
+        prev_surface: 前一帧表面状态 (7,)，None 表示首帧
+        stimulus_metadata: 刺激元属性（约束②），含置信度/来源/衰减因子
 
     Returns:
-        {"internal_state": (8,), "relationship_state": (6,), "surface_state": (7,)}
+        {"internal_state": (8,), "relationship_state": (3,), "surface_state": (7,)}
     """
     if current_internal is None:
         return initialize_all(traits)
+
+    # 约束②：应用刺激元属性 — 置信度缩放 + missing 维度清零
+    if stimulus_metadata is not None:
+        stimuli = stimuli * stimulus_metadata.confidence
+        missing_mask = stimulus_metadata.source == 3
+        stimuli[missing_mask] = 0.0
 
     # ① 防御剖面 → inner / outer
     profiles = compute_defense_profiles(traits, current_relationship, current_internal)
@@ -76,10 +88,18 @@ def update_all(
     )
     new_relationship = update_relationship_state(
         current_relationship, inner_stimuli, traits,
+        current_internal=new_internal,
     )
 
-    # ③ 表面投影
-    surface = project_surface(new_internal, new_relationship, traits, outer_stimuli)
+    # ③ 表面投影（带惯性混合）
+    surface = project_surface(
+        new_internal, new_relationship, outer_stimuli, prev_surface,
+    )
+
+    # ④ 表面→内部反馈（第二帧起生效，trace 量级微小调制）
+    if prev_surface is not None:
+        feedback = compute_surface_feedback(surface, new_internal)
+        new_internal = soft_clamp(new_internal + feedback, -1.0, 1.0)
 
     return {
         "internal_state": new_internal,

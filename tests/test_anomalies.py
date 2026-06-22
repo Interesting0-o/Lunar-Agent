@@ -9,8 +9,8 @@ from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_INTIMACY,
+    R_TRUST_BOND, R_INTIMACY, R_SIZE,
     S_EXPRESSIVENESS, S_WARMTH, S_SHARPNESS, S_SOFTNESS,
     S_ENTHUSIASM, S_RESTRAINT, S_VULNERABILITY, S_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
@@ -106,15 +106,7 @@ class TestAnomalySingleRoundResponsiveness:
 
         stimuli_batch = rng.beta(2, 2, size=(n, ST_SIZE))
 
-        internal_ranges = np.zeros((n, I_SIZE))
-        surface_ranges = np.zeros((n, S_SIZE))
-
-        for i in range(n):
-            result = update_all(internal, rel, traits, stimuli_batch[i])
-            internal_ranges[i] = np.abs(result["internal_state"] - internal)
-            surface_ranges[i] = np.abs(result["surface_state"] - result["surface_state"])  # always 0...
-
-        # 改用 sigma 比较
+        # 直接用 sigma 比较（比单轮 delta 更稳健）
         all_internal = np.zeros((n, I_SIZE))
         all_surface = np.zeros((n, S_SIZE))
         for i in range(n):
@@ -136,57 +128,76 @@ class TestAnomalyRateParameters:
     """探测：α/β 速率参数的分布和边界（γ 已弃用，转移到 _decay.py）。"""
 
     def test_beta_vs_alpha_balance(self, rng):
-        """α 和 β 的相对大小决定刺激 vs 耦合的权重。
+        """α 和逐维度 β 的相对大小——耦合 vs 刺激的权重分布。
 
-        探测在随机参数下 α/β 的分布。
+        β 现在是 (7,) 逐刺激维度向量，不再有全局标量。
+        这里报告 α 和 β_stim 的均值/范围，并标记耦合主导的维度比例。
         """
         from state_engine._utils import soft_clamp
+        from state_engine._defenses import compute_defense_profiles
+        from state import ST_SIZE, T_EMOTIONAL_OPENNESS
 
         n = 20_000
         traits = rng.uniform(-0.999, 0.999, size=(n, 10))
-        rel = rng.uniform(-0.999, 0.999, size=(n, 6))
+        rel = rng.uniform(-0.999, 0.999, size=(n, R_SIZE))
+        internal = rng.uniform(-0.999, 0.999, size=(n, 8))
 
         alphas = np.empty(n)
-        betas = np.empty(n)
-        gammas = np.empty(n)
+        beta_means = np.empty(n)
+        beta_mins = np.empty(n)
+        beta_maxs = np.empty(n)
 
         for i in range(n):
             t = traits[i]
             r = rel[i]
+            i_state = internal[i]
 
-            alpha = t[3] * 0.30 + (1.0 - t[3]) * 0.15 + r[1] * 0.12  # T_EMOTIONAL_STABILITY=3, R_TRUST=1
+            # α: 与 update_internal_state 完全一致的公式
+            alpha = 0.285
+            alpha += t[T_EMOTIONAL_OPENNESS] * 0.15
+            alpha -= t[T_EMOTIONAL_STABILITY] * 0.075
+            alpha += r[R_TRUST_BOND] * 0.06
             alpha = soft_clamp(alpha, 0.02, 0.35)
-
-            beta = 0.10
-            beta = soft_clamp(beta, 0.01, 0.35)  # without profiles, beta stays at 0.10
-
-            gamma = 0.08 + t[3] * 0.10 + t[4] * 0.06 - t[5] * 0.06
-            gamma = soft_clamp(gamma, 0.01, 0.25)
-
             alphas[i] = alpha
-            betas[i] = beta
-            gammas[i] = gamma
+
+            # β: 逐维度向量，来自防御剖面
+            profiles = compute_defense_profiles(t, r, i_state)
+            deact, hyper = profiles[0], profiles[1]
+            beta_stim = 0.05 + hyper * 0.35 - deact * 0.15
+            beta_stim = np.clip(beta_stim, 0.01, 0.35)
+            beta_means[i] = beta_stim.mean()
+            beta_mins[i] = beta_stim.min()
+            beta_maxs[i] = beta_stim.max()
 
         print(f"\n  === 速率参数分布 (n={n:,}) ===")
         print(f"  α (耦合): μ={alphas.mean():.3f} σ={alphas.std():.3f} [{alphas.min():.3f}, {alphas.max():.3f}]")
-        print(f"  β (刺激): μ={betas.mean():.3f} σ={betas.std():.3f} [{betas.min():.3f}, {betas.max():.3f}]")
-        print(f"  γ (恢复): μ={gammas.mean():.3f} σ={gammas.std():.3f} [{gammas.min():.3f}, {gammas.max():.3f}]")
+        print(f"  β_mean (7维均值): μ={beta_means.mean():.3f} σ={beta_means.std():.3f} [{beta_means.min():.3f}, {beta_means.max():.3f}]")
+        print(f"  β_min  (7维最小): μ={beta_mins.mean():.3f} σ={beta_mins.std():.3f} [{beta_mins.min():.3f}, {beta_mins.max():.3f}]")
+        print(f"  β_max  (7维最大): μ={beta_maxs.mean():.3f} σ={beta_maxs.std():.3f} [{beta_maxs.min():.3f}, {beta_maxs.max():.3f}]")
 
-        # α/β 比率
-        ratio = alphas / (betas + 1e-10)
-        print(f"  α/β 比率: μ={ratio.mean():.2f} σ={ratio.std():.2f} [{ratio.min():.2f}, {ratio.max():.2f}]")
+        # α/β_mean 比率
+        ratio = alphas / (beta_means + 1e-10)
+        print(f"  α/β_mean 比率: μ={ratio.mean():.2f} σ={ratio.std():.2f} [{ratio.min():.2f}, {ratio.max():.2f}]")
 
-        # 多少情况下 α > β（耦合主导）?
-        alpha_dominates = (alphas > betas).mean()
-        print(f"  α > β 的比例: {alpha_dominates*100:.1f}%")
-        if alpha_dominates > 0.5:
-            print(f"  ⚠️ 大多数情况下耦合效应强于刺激效应")
+        # 每轮中，有多少刺激维度 β[s] < α（耦合主导）?
+        total = 0
+        for i in range(n):
+            profiles = compute_defense_profiles(traits[i], rel[i], internal[i])
+            deact, hyper = profiles[0], profiles[1]
+            beta_stim = np.clip(0.05 + hyper * 0.35 - deact * 0.15, 0.01, 0.35)
+            total += (beta_stim < alphas[i]).sum()
+        coupling_dominated_pct = total / (n * ST_SIZE) * 100
+        print(f"  耦合主导的刺激维度比例 (β[s] < α): {coupling_dominated_pct:.1f}%")
+        if coupling_dominated_pct > 80:
+            print(f"  ⚠️ 大多数刺激维度上耦合效应强于刺激效应")
+        elif coupling_dominated_pct < 20:
+            print(f"  ℹ️ 大多数刺激维度上刺激效应强于耦合效应")
 
     def test_defense_profile_extremes(self, rng):
         """探测防御剖面在何种参数组合下达到极端值（接近 0 或 1）。"""
         n = 30_000
         traits = rng.beta(0.2, 0.2, size=(n, 10)) * 2 - 1
-        rel = rng.beta(0.2, 0.2, size=(n, 6)) * 2 - 1
+        rel = rng.beta(0.2, 0.2, size=(n, R_SIZE)) * 2 - 1
         internal = rng.beta(0.2, 0.2, size=(n, 8)) * 2 - 1
 
         deact_means = np.empty(n)
@@ -283,7 +294,7 @@ class TestAnomalyDefenseCollapse:
         """deact 和 hyper 的相关性 —— 如果高度相关则失去了独立防御维度的意义。"""
         n = 30_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         internal = rng.uniform(-1, 1, size=(n, 8))
 
         deact_arr = np.empty(n)
@@ -411,15 +422,14 @@ class TestAnomalySurfaceDegeneracy:
         """在随机参数空间中 surface 各维度达到 [-1.0, -0.99] 或 [0.99, 1.0] 的频率。"""
         n = 50_000
         internal = rng.uniform(-1, 1, size=(n, 8))
-        relationship = rng.uniform(-1, 1, size=(n, 6))
-        traits = rng.uniform(-1, 1, size=(n, 10))
-        outer = rng.uniform(-1, 1, size=(n, 7))
+        relationship = rng.uniform(-1, 1, size=(n, R_SIZE))
+        outer = rng.uniform(0, 1, size=(n, 7))  # outer 已由 deactivation 压抑至 [0, 1]
 
         floor_counts = np.zeros(S_SIZE)
         ceil_counts = np.zeros(S_SIZE)
 
         for i in range(n):
-            s = project_surface(internal[i], relationship[i], traits[i], outer[i])
+            s = project_surface(internal[i], relationship[i], outer[i])
             floor_counts += (s < -0.99).astype(int)
             ceil_counts += (s > 0.99).astype(int)
 
@@ -440,46 +450,70 @@ class TestAnomalyBetaModulation:
     def test_beta_range_after_fix(self, rng):
         """β 在不同防御配置下应有可观测的变动范围。
 
-        修复后（2026-06-18）：sigmoid 缩放 + β 公式重写，
-        预期 β 有效范围 > 0.10（旧设计仅 0.042）。
+        验证两个层次：
+        1. 全局均值调制（scalar mean）：防御剖面仍整体影响 β 水平
+        2. 维度间离散度（per-stimulus）：同一剖面下各刺激维度的 β 应有差异
+
+        β 公式: 0.05 + hyper[s]*0.35 - deact[s]*0.15 → 逐维 → clip(0.01, 0.35)
         """
-        from state_engine._dynamics import update_internal_state
         n = 50_000
         traits_batch = rng.uniform(-1, 1, size=(n, 10))
-        rel_batch = rng.uniform(-1, 1, size=(n, 6))
+        rel_batch = rng.uniform(-1, 1, size=(n, R_SIZE))
         internal_batch = rng.uniform(-1, 1, size=(n, 8))
-        zero_stim = np.zeros(7)
 
-        betas = np.empty(n)
+        scalar_betas = np.empty(n)          # 旧版标量兼容：deact.mean(), hyper.mean()
+        beta_within_std = np.empty(n)       # per-stimulus 的维度间离散度
+
         for i in range(n):
             profiles = compute_defense_profiles(
                 traits_batch[i], rel_batch[i], internal_batch[i],
             )
-            deact, hyper = profiles[0].mean(), profiles[1].mean()
-            beta = max(0.01, min(0.35, 0.05 + hyper * 0.35 - deact * 0.15))
-            betas[i] = beta
+            deact, hyper = profiles[0], profiles[1]
+            # 标量兼容（检验整体调制）
+            scalar_betas[i] = np.clip(
+                0.05 + hyper.mean() * 0.35 - deact.mean() * 0.15, 0.01, 0.35,
+            )
+            # per-stimulus 向量（检验维度区分）
+            beta_vec = np.clip(0.05 + hyper * 0.35 - deact * 0.15, 0.01, 0.35)
+            beta_within_std[i] = beta_vec.std()
 
-        low_group = betas < betas.mean() - betas.std()
-        high_group = betas > betas.mean() + betas.std()
-        effective_range = betas.max() - betas.min()
-        coef_var = betas.std() / betas.mean()
+        low_group = scalar_betas < scalar_betas.mean() - scalar_betas.std()
+        high_group = scalar_betas > scalar_betas.mean() + scalar_betas.std()
+        effective_range = scalar_betas.max() - scalar_betas.min()
+        coef_var = scalar_betas.std() / scalar_betas.mean()
 
         print(f"\n  === β 调制范围检验 (n={n:,}) ===")
-        print(f"  β 范围: [{betas.min():.4f}, {betas.max():.4f}]")
-        print(f"  β 均值: {betas.mean():.4f} ± {betas.std():.4f}")
-        print(f"  β 有效变动: {effective_range:.4f}")
-        print(f"  β 变异系数: {coef_var:.3f}")
+        print(f"  ── 整体调制（scalar mean）──")
+        print(f"  标量 β 范围: [{scalar_betas.min():.4f}, {scalar_betas.max():.4f}]")
+        print(f"  标量 β 均值: {scalar_betas.mean():.4f} ± {scalar_betas.std():.4f}")
+        print(f"  标量 β 有效变动: {effective_range:.4f}")
+        print(f"  标量 β 变异系数: {coef_var:.3f}")
         print(f"  低 β 组占比: {low_group.mean()*100:.1f}%  "
-              f"(mean={betas[low_group].mean():.4f})")
+              f"(mean={scalar_betas[low_group].mean():.4f})")
         print(f"  高 β 组占比: {high_group.mean()*100:.1f}%  "
-              f"(mean={betas[high_group].mean():.4f})")
+              f"(mean={scalar_betas[high_group].mean():.4f})")
+
+        print(f"  ── 维度间离散度（per-stimulus σ）──")
+        print(f"  多维 β 内标准差: μ={beta_within_std.mean():.4f} "
+              f"σ={beta_within_std.std():.4f} "
+              f"[{beta_within_std.min():.4f}, {beta_within_std.max():.4f}]")
+        # 离散度诊断：若某条目的 7 维 β 几乎相同（std < 0.005），说明维度区分失效
+        degenerate = (beta_within_std < 0.005).mean()
+        print(f"  退化比例 (σ < 0.005): {degenerate*100:.1f}%")
 
         if effective_range < 0.05:
-            print(f"  🔴 β 有效变动 {effective_range:.4f} < 0.05 — 调制基本失效")
+            print(f"  🔴 标量 β 有效变动 {effective_range:.4f} < 0.05 — 调制基本失效")
         elif effective_range < 0.15:
-            print(f"  🟡 β 有效变动 {effective_range:.4f} — 有一定范围但偏窄")
+            print(f"  🟡 标量 β 有效变动 {effective_range:.4f} — 有一定范围但偏窄")
         else:
-            print(f"  ✅ β 有效变动 {effective_range:.4f} — 调制效果良好")
+            print(f"  ✅ 标量 β 有效变动 {effective_range:.4f} — 调制效果良好")
+
+        if degenerate > 0.5:
+            print(f"  🔴 per-stimulus β 退化率 {degenerate*100:.1f}% > 50% — 维度区分失效")
+        elif degenerate > 0.1:
+            print(f"  🟡 per-stimulus β 退化率 {degenerate*100:.1f}% — 部分条目无维度区分")
+        else:
+            print(f"  ✅ per-stimulus β 维度区分正常")
 
 
 class TestAnomalyMatrixNoise:

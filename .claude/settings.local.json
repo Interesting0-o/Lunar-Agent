@@ -33,7 +33,8 @@
       "WebFetch(domain:zenodo.org)",
       "WebFetch(domain:hexdocs.pm)",
       "Bash(git add *)",
-      "Bash(git commit -m 'docs: 更新STATE_ENGINE_TEST_REPORT反映架构变更 *)"
+      "Bash(git commit -m 'docs: 更新STATE_ENGINE_TEST_REPORT反映架构变更 *)",
+      "Bash(uv run *)"
     ]
   }
 }

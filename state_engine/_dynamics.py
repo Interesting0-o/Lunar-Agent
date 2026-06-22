@@ -1,79 +1,53 @@
 """State Dynamics —— 残差式状态更新（刺激+耦合驱动，无 per-turn 稳态恢复）。
 
 核心公式:
-  h_t = h_{t-1} + Δt · (α·Δ_coupling + β·Δ_stimulus)
+  h_t = h_{t-1} + Δt · (α·Δ_coupling + Δ_stimulus_modulated)
 
-两个速率参数分别由不同的人格/关系/防御因素调制:
+两个参数 + 一个逐维度调制:
   α — 跨维度耦合速率 (traits + relationship)
-  β — 刺激接受速率    (defense profiles: hyperactivation↑, deactivation↓)
+  β — 刺激接受速率，逐刺激维度 (defense profiles: hyper↑每维, deact↓每维)
 
 稳态恢复（拉到人格基线）已移除——职责转移到 _decay.py 的时间衰减。
-也就是说，每轮对话中状态完全由刺激和耦合驱动，不向 setpoint 拉。
-回 base 靠的是真实时间流逝（_decay.apply_time_decay）。
 
-设计理由:
-  - 持续单一刺激下情绪应累积（耦合平衡点 h_eq），不应被 per-turn 恢复抵消
-  - 时间衰减才是现实世界中情绪回归基线的通道（affective chronometry）
-  - 这避免了 h_eq ≠ setpoint 的系统性偏离问题（见测试报告 2.2/2.3）
+约束合规:
+  - SELF_DECAY / REL_SELF_DECAY / DECAY_TARGETS → WeightVector in _dynamics_weights.py
+  - 耦合系数 (internal/relationship/cross-scale) → WeightMapper in _dynamics_weights.py
+  - 所有参数带完整 provenance
 """
 
 import numpy as np
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
-    I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
-    T_EMOTIONAL_OPENNESS, T_EMOTIONAL_STABILITY,
-    T_OPTIMISM, T_ANXIETY_PRONENESS, T_ANGER_REACTIVITY,
-    T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
-    DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
+    I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY,
 )
 from ._utils import soft_clamp
 from ._matrices import INPUT_INFLUENCE_B, REL_INPUT_INFLUENCE_B
+from ._dynamics_weights import (
+    SELF_DECAY, DECAY_TARGETS, REL_SELF_DECAY,
+    INTERNAL_COUPLING, RELATIONSHIP_COUPLING, CROSS_SCALE_COUPLING,
+    ALPHA_MAPPER, ALPHA_REL_MAPPER, BETA_REL_MAPPER,
+    BETA_BASE, HYPER_BETA_GAIN, DEACT_BETA_GAIN,
+    SETPOINT_MAPPER, REL_SETPOINT_MAPPER,
+)
 
 
 def compute_setpoint(traits: np.ndarray) -> np.ndarray:
     """计算人格决定的内部情绪稳态基线。
 
-    不同人格有不同的"正常"情绪水平:
-      - 高焦虑 → stress/insecurity 基线高
-      - 高乐观 → energy 基线高
-      - 高依恋焦虑 → longing 基线高
-      - 高易怒 → irritation 基线高
-
-    setpoint 是系统在无外部刺激时的长期收敛目标。
+    通过 SETPOINT_MAPPER(LinearMapping) 计算:
+      sp = DEFAULT_INTERNAL + traits @ W  (W 带 provenance)
     """
-    sp = DEFAULT_INTERNAL.copy()
-
-    sp[I_ENERGY]     += traits[T_OPTIMISM] * 0.15 - traits[T_ANXIETY_PRONENESS] * 0.08
-    sp[I_STRESS]     += traits[T_ANXIETY_PRONENESS] * 0.20 + traits[T_ANGER_REACTIVITY] * 0.05
-    sp[I_LONELINESS] += traits[T_ATTACHMENT_ANXIETY] * 0.10 - traits[T_OPTIMISM] * 0.05
-    sp[I_INSECURITY] += traits[T_ATTACHMENT_ANXIETY] * 0.20 + traits[T_ANXIETY_PRONENESS] * 0.10
-    sp[I_IRRITATION] += traits[T_ANGER_REACTIVITY] * 0.15 - traits[T_EMOTIONAL_STABILITY] * 0.10
-    sp[I_LONGING]    += traits[T_ATTACHMENT_ANXIETY] * 0.15
-    sp[I_SOCIAL_BATTERY] += traits[T_EMOTIONAL_STABILITY] * 0.05
-    sp[I_MENTAL_FATIGUE] -= traits[T_EMOTIONAL_STABILITY] * 0.08 + traits[T_ANXIETY_PRONENESS] * 0.05
-
-    return np.clip(sp, -0.9, 0.9)
+    return np.clip(SETPOINT_MAPPER.compute(traits), -0.9, 0.9)
 
 
 def compute_rel_setpoint(traits: np.ndarray) -> np.ndarray:
-    """计算人格决定的关系稳态基线。
+    """计算人格决定的关系稳态基线（3 维版）。
 
-    依恋回避 → 信任/好感/依赖基线低
-    依恋焦虑 → 依赖基线高
+    通过 REL_SETPOINT_MAPPER(LinearMapping) 计算:
+      sp = DEFAULT_RELATIONSHIP + traits @ W  (W 带 provenance)
     """
-    sp = DEFAULT_RELATIONSHIP.copy()
-
-    sp[R_TRUST]             -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_AFFECTION]         -= traits[T_ATTACHMENT_AVOIDANCE] * 0.10
-    sp[R_DEPENDENCY]        -= traits[T_ATTACHMENT_AVOIDANCE] * 0.15
-    sp[R_DEPENDENCY]        += traits[T_ATTACHMENT_ANXIETY] * 0.10
-    sp[R_EMOTIONAL_SAFETY]  -= traits[T_ATTACHMENT_AVOIDANCE] * 0.12
-    sp[R_FAMILIARITY]       -= traits[T_ATTACHMENT_AVOIDANCE] * 0.05
-    sp[R_ROMANTIC_TENSION]  += traits[T_ATTACHMENT_ANXIETY] * 0.05
-
-    return np.clip(sp, -0.96, 0.96)
+    return np.clip(REL_SETPOINT_MAPPER.compute(traits), -0.96, 0.96)
 
 
 def update_internal_state(
@@ -86,70 +60,47 @@ def update_internal_state(
 ) -> np.ndarray:
     """残差式内部状态更新。
 
-    h_t = h_{t-1} + dt · (α·Δ_coupling + β·Δ_stimulus)
-
-    防御剖面 (profiles) 控制 β 的速率，不直接控制状态值。
+    h_t = h_{t-1} + dt · (α·Δ_coupling + Δ_stimulus_modulated)
 
     Args:
         current: 当前内部状态 h_{t-1} (8,)
         inner_stimuli: 防御过滤后的"里"刺激 (7,)
         traits: 人格特质 (10,)
-        relationship: 关系状态 (6,)
+        relationship: 关系状态 (3,)
         profiles: 防御剖面 (2, 7)
         dt: 时间步长
 
     Returns:
         更新后的内部状态 h_t (8,)
     """
-    deact = profiles[0]  # 去激活
-    hyper = profiles[1]  # 过度激活
+    deact = profiles[0]  # 去激活 (7,)
+    hyper = profiles[1]  # 过度激活 (7,)
 
     # ── α: 跨维度耦合速率 ──
-    # 由 traits 决定。开放→耦合快，稳定→耦合慢（更独立），信任→耦合快。
-    alpha = 0.285
-    alpha += traits[T_EMOTIONAL_OPENNESS] * 0.15
-    alpha -= traits[T_EMOTIONAL_STABILITY] * 0.075
-    alpha += relationship[R_TRUST] * 0.06
+    # 由 ALPHA_MAPPER(LinearMapping) 计算，带完整 provenance。
+    alpha = ALPHA_MAPPER.compute(np.concatenate([traits, relationship]))[0]
     alpha = soft_clamp(alpha, 0.02, 0.35)
 
-    # ── β: 刺激接受速率 ──
-    # 由防御剖面决定。过度激活→接受快（正权重），去激活→接受慢（负权重）。
-    # 新公式（2026-06-18）：加大 hyper 权重、降低 deact 抵消力度，
-    # 使防御剖面真正影响响应速率，而不是相互抵消。
-    beta = 0.05
-    beta += hyper.mean() * 0.35
-    beta -= deact.mean() * 0.15
-    beta = soft_clamp(beta, 0.01, 0.35)
+    # ── β: 刺激接受速率（逐刺激维度）──
+    # β_base + hyper * hyper_gain + deact * deact_gain
+    # 所有系数来自 _dynamics_weights.py（WeightVector 带 provenance）
+    beta_stim = BETA_BASE + hyper * HYPER_BETA_GAIN + deact * DEACT_BETA_GAIN
+    beta_stim = np.clip(beta_stim, 0.01, 0.35)
 
     # ── Δ_coupling: 跨维度耦合 + 每维度自阻尼 ──
-    # 替代旧的 A 矩阵（STATE_COUPLING_A @ h − h）:
-    # 自阻尼系数对应原 A 矩阵对角线 0.85 → 每轮向 0 回归 15%
-    SELF_DECAY = np.full(I_SIZE, 0.15)
+    # 耦合矩阵通过 WeightMapper 构建（_dynamics_weights.py），带完整 provenance。
+    # SELF_DECAY 是每维度独立自阻尼率。
+    coupling = current @ INTERNAL_COUPLING  # current (8,) @ M (8,8) → (8,)
+    delta_coupling = coupling - SELF_DECAY * (current - DECAY_TARGETS)
 
-    # 跨维度耦合：显式命名规则，每条附心理学依据
-    coupling = np.zeros(I_SIZE, dtype=np.float64)
-    coupling[I_STRESS]     += current[I_ENERGY] * (-0.05)        # 精力充沛→压力降低
-    coupling[I_STRESS]     += current[I_INSECURITY] * 0.10       # 不安全感→压力
-    coupling[I_LONELINESS] += current[I_ENERGY] * (-0.05)        # 精力充沛→孤独感降低
-    coupling[I_LONELINESS] += current[I_STRESS] * 0.08           # 压力→孤独感
-    coupling[I_INSECURITY] += current[I_LONELINESS] * 0.12       # 孤独→不安
-    coupling[I_IRRITATION] += current[I_STRESS] * 0.15           # 压力积累→易怒
-    coupling[I_IRRITATION] += current[I_SOCIAL_BATTERY] * (-0.08) # 社交电量低→烦躁
-    coupling[I_LONGING]    += current[I_LONELINESS] * 0.15       # 孤独→思念
-    coupling[I_MENTAL_FATIGUE] += current[I_STRESS] * 0.10       # 压力→精神疲劳
-    coupling[I_MENTAL_FATIGUE] += current[I_SOCIAL_BATTERY] * (-0.10) # 社交电量低→疲劳
-
-    delta_coupling = coupling - SELF_DECAY * current
-
-    # ② 刺激输入
-    delta_stimulus = inner_stimuli @ INPUT_INFLUENCE_B
+    # ② 刺激输入：逐维度 β 调制 → B 矩阵映射
+    modulated_stimuli = beta_stim * inner_stimuli  # (7,), 逐元素乘
+    delta_stimulus = modulated_stimuli @ INPUT_INFLUENCE_B
 
     # ③ 稳态恢复已移除——拉到 setpoint 的职责交给 _decay.py
-    #    （时间衰减，由真实时间 Δt 驱动）。
-    #    每轮对话中，状态完全由刺激和耦合驱动。
 
     # ── 残差更新 ──
-    delta = alpha * delta_coupling + beta * delta_stimulus  # γ 项已移除
+    delta = alpha * delta_coupling + delta_stimulus
     return soft_clamp(current + dt * delta, -1.0, 1.0)
 
 
@@ -158,48 +109,39 @@ def update_relationship_state(
     inner_stimuli: np.ndarray,
     traits: np.ndarray,
     dt: float = 1.0,
+    current_internal: np.ndarray | None = None,
 ) -> np.ndarray:
     """残差式关系状态更新（时间常数比内部状态慢 5-10 倍）。
 
     与 update_internal_state 同构，但:
       - α_rel 更小（关系变化极慢）
       - β_rel 更小（刺激对关系的影响有缓冲）
+      - 可选的 current_internal 参数提供跨尺度耦合（内→关）
     """
     # ── α_rel: 关系跨维度耦合速率 ──
-    alpha = 0.045
-    alpha += traits[T_EMOTIONAL_OPENNESS] * 0.02
-    alpha += current[R_TRUST] * 0.015
-    alpha += current[R_EMOTIONAL_SAFETY] * 0.01
+    # 由 ALPHA_REL_MAPPER(LinearMapping) 计算，带完整 provenance。
+    alpha = ALPHA_REL_MAPPER.compute(np.concatenate([traits, current]))[0]
     alpha = soft_clamp(alpha, 0.005, 0.06)
 
     # ── β_rel: 关系刺激接受速率 ──
-    beta = 0.0275
-    beta += traits[T_ATTACHMENT_ANXIETY] * 0.0075
+    # 由 BETA_REL_MAPPER(LinearMapping) 计算，带完整 provenance。
+    beta = BETA_REL_MAPPER.compute(traits)[0]
     beta = soft_clamp(beta, 0.002, 0.06)
 
-    # ── γ_rel: 关系稳态恢复速率（已移除） ──
-    # 关系稳态恢复由 _decay.py 的时间衰减负责。
+    # ── Δ_coupling: 关系耦合 + 自阻尼 + 跨尺度 ──
+    # 关系耦合矩阵 (3×3, WeightMapper 构建)
+    rel_coupling = current @ RELATIONSHIP_COUPLING  # current (3,) @ M (3,3) → (3,)
 
-    # ── Δ_coupling: 关系跨维度耦合 + 自阻尼 ──
-    # 替代旧的 REL_STATE_COUPLING_A @ h − h
-    # 原矩阵经谱归一化（缩放 0.9441），自阻尼 ≈ 0.1503
-    REL_SELF_DECAY = np.full(R_SIZE, 0.15033222)
-
-    rel_coupling = np.zeros(R_SIZE, dtype=np.float64)
-    rel_coupling[R_TRUST]            += current[R_AFFECTION] * 0.075526      # 好感→信任
-    rel_coupling[R_TRUST]            += current[R_EMOTIONAL_SAFETY] * 0.047204  # 安全感→信任
-    rel_coupling[R_FAMILIARITY]      += current[R_AFFECTION] * 0.047204     # 好感→熟悉度
-    rel_coupling[R_DEPENDENCY]       += current[R_TRUST] * 0.047204         # 信任→依赖
-    rel_coupling[R_EMOTIONAL_SAFETY] += current[R_TRUST] * 0.094408        # 信任→安全感
-    rel_coupling[R_EMOTIONAL_SAFETY] += current[R_FAMILIARITY] * 0.075526  # 熟悉→安全感
-    rel_coupling[R_AFFECTION]        += current[R_EMOTIONAL_SAFETY] * 0.047204  # 安全感→好感
-    rel_coupling[R_AFFECTION]        += current[R_ROMANTIC_TENSION] * 0.028322  # 暧昧→好感
-    rel_coupling[R_ROMANTIC_TENSION] += current[R_DEPENDENCY] * 0.047204   # 依赖→暧昧
+    # 跨尺度耦合（内→关）
+    if current_internal is not None:
+        cross = current_internal @ CROSS_SCALE_COUPLING  # internal (8,) @ M (8,3) → (3,)
+        rel_coupling = rel_coupling + cross
 
     delta_coupling = rel_coupling - REL_SELF_DECAY * current
 
     # ── 刺激输入 ──
     delta_stimulus = inner_stimuli @ REL_INPUT_INFLUENCE_B
+    delta_stimulus *= beta
 
-    delta = alpha * delta_coupling + beta * delta_stimulus  # 无 gamma 项
+    delta = alpha * delta_coupling + delta_stimulus
     return soft_clamp(current + dt * delta, -1.0, 1.0)

@@ -87,6 +87,7 @@ def perception_node(state: State) -> dict:
     """感知节点：从用户输入中直接提取心理刺激强度。
 
     将 user_stimuli 写入图 State，state_engine_node 消费后会立即清理。
+    同时写入 stimulus_metadata（约束②），包含置信度/来源/衰减因子。
     失败时设置 error=True，条件边据此引导到 END。
     """
     cfg = PERCEPTION_CONFIG
@@ -98,6 +99,7 @@ def perception_node(state: State) -> dict:
 
     return {
         "user_stimuli": result["user_stimuli"],
+        "stimulus_metadata": result.get("stimulus_metadata"),
         "error": False,
     }
 
@@ -106,6 +108,7 @@ def state_engine_node(state: State) -> dict:
     """状态引擎节点：根据感知输出的心理刺激 + 当前状态 + Traits 更新所有状态层。
 
     读取 state 中的 user_stimuli 后将其置为 None，避免 checkpoint 残留。
+    同时读取并传递 stimulus_metadata（约束②）。
     """
     if state.get("error"):
         logger.info("state_engine 跳过本轮（perception 已标记 error）")
@@ -115,15 +118,31 @@ def state_engine_node(state: State) -> dict:
     traits = _ensure_array(state.get("traits"))
     stimuli = _ensure_array(state.get("user_stimuli"))
 
+    # ── 重建 StimulusMetadata（从 dict → dataclass，约束②） ──
+    meta_dict = state.get("stimulus_metadata")
+    if meta_dict is not None and isinstance(meta_dict, dict):
+        from state import StimulusMetadata
+        metadata = StimulusMetadata(
+            confidence=np.asarray(meta_dict["confidence"], dtype=np.float64),
+            source=np.asarray(meta_dict["source"], dtype=np.int8),
+            decay_modulator=np.asarray(meta_dict["decay_modulator"], dtype=np.float64),
+            timestamp=float(meta_dict.get("timestamp", 0.0)),
+        )
+    else:
+        metadata = None
+
     result = update_all(
         current_internal=_ensure_array(state.get("internal_state")),
         current_relationship=_ensure_array(state.get("relationship_state")),
         traits=traits,
         stimuli=stimuli,
+        prev_surface=_ensure_array(state.get("surface_state")),
+        stimulus_metadata=metadata,
     )
 
     # 消费后清理中间数据，避免 checkpoint 残留
     result["user_stimuli"] = None
+    result["stimulus_metadata"] = None
 
     return result
 

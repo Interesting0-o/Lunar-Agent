@@ -15,13 +15,13 @@ from state import (
     DEFAULT_TRAITS, DEFAULT_INTERNAL, DEFAULT_RELATIONSHIP,
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE, I_SIZE,
-    R_AFFECTION, R_TRUST, R_FAMILIARITY, R_DEPENDENCY,
-    R_EMOTIONAL_SAFETY, R_ROMANTIC_TENSION, R_SIZE,
+    R_AFFECTION, R_TRUST_BOND, R_INTIMACY, R_SIZE,
     ST_ABANDONMENT, ST_VALIDATION, ST_CLOSENESS, ST_CONFLICT,
     ST_DEPENDENCY, ST_TEASING, ST_EMOTIONAL_WEIGHT, ST_SIZE,
     T_ATTACHMENT_ANXIETY, T_ATTACHMENT_AVOIDANCE,
     T_EMOTIONAL_STABILITY, T_OPTIMISM, T_ANXIETY_PRONENESS,
     T_ANGER_REACTIVITY, T_PRIDE, T_JEALOUSY_SENSITIVITY,
+    T_SIZE,
     I_LABELS, R_LABELS, ST_LABELS,
 )
 from state_engine._dynamics import (
@@ -94,8 +94,8 @@ class TestSetpoint:
 
         sp_low = compute_rel_setpoint(t_low)
         sp_high = compute_rel_setpoint(t_high)
-        assert sp_high[R_TRUST] < sp_low[R_TRUST], (
-            f"高回避 trust sp={sp_high[R_TRUST]:.3f} ≥ 低回避={sp_low[R_TRUST]:.3f}"
+        assert sp_high[R_TRUST_BOND] < sp_low[R_TRUST_BOND], (
+            f"高回避 trust sp={sp_high[R_TRUST_BOND]:.3f} ≥ 低回避={sp_low[R_TRUST_BOND]:.3f}"
         )
 
     def test_default_setpoint_finite(self, default_traits):
@@ -287,21 +287,57 @@ class TestStimulusDirectionality:
 
     # ── 关系状态（B_rel） ──
 
-    def test_rel_abandonment_reduces_safety(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_ABANDONMENT, R_EMOTIONAL_SAFETY] < 0
+    def test_rel_abandonment_reduces_trust_bond(self):
+        """验证新显式命名规则: abandonment → trust_bond--."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_ABANDONMENT] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_TRUST_BOND] < curr[R_TRUST_BOND], \
+            "abandonment 应减少信任纽带"
 
     def test_rel_validation_increases_affection(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_VALIDATION, R_AFFECTION] > 0
+        """验证新显式命名规则: validation → affection++."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_VALIDATION] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_AFFECTION] > curr[R_AFFECTION], \
+            "validation 应增加好感度"
 
-    def test_rel_closeness_increases_familiarity(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_CLOSENESS, R_FAMILIARITY] > 0
+    def test_rel_closeness_increases_intimacy(self):
+        """验证新显式命名规则: closeness → intimacy++."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_CLOSENESS] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_INTIMACY] > curr[R_INTIMACY], \
+            "closeness 应增加亲密张力"
 
-    def test_rel_conflict_reduces_trust(self):
-        from state_engine._matrices import REL_INPUT_INFLUENCE_B
-        assert REL_INPUT_INFLUENCE_B[ST_CONFLICT, R_TRUST] < 0
+    def test_rel_conflict_reduces_trust_bond(self):
+        """验证新显式命名规则: conflict → trust_bond--."""
+        from state_engine._dynamics import update_relationship_state
+        from state_engine._defenses import apply_defenses
+        curr = DEFAULT_RELATIONSHIP.copy()
+        stimuli = np.zeros(ST_SIZE)
+        stimuli[ST_CONFLICT] = 0.8
+        traits = DEFAULT_TRAITS.copy()
+        inner_s, _ = apply_defenses(stimuli, np.ones((2, ST_SIZE)) * 0.3)
+        result = update_relationship_state(curr, inner_s, traits)
+        assert result[R_TRUST_BOND] < curr[R_TRUST_BOND], \
+            "conflict 应减少信任纽带"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -390,7 +426,7 @@ class TestDynamicsBulk:
         """5000 组随机输入: update_internal_state 输出 ∈ [-1, 1]。"""
         n = 20_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         current = rng.uniform(-1, 1, size=(n, 8))
         stimuli = rng.uniform(0, 1, size=(n, 7))
         # profiles 也用随机值（但由 traits 决定，这里直接随机化）
@@ -416,7 +452,7 @@ class TestDynamicsBulk:
         """5000 组随机输入: update_relationship_state 输出 ∈ [-1, 1]。"""
         n = 20_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        current = rng.uniform(-1, 1, size=(n, 6))
+        current = rng.uniform(-1, 1, size=(n, R_SIZE))
         stimuli = rng.uniform(0, 1, size=(n, 7))
 
         violations = 0
@@ -455,7 +491,7 @@ class TestDynamicsBulk:
         """大规模统计: 单轮变化幅度的分布。"""
         n = 15_000
         traits = rng.uniform(-1, 1, size=(n, 10))
-        rel = rng.uniform(-1, 1, size=(n, 6))
+        rel = rng.uniform(-1, 1, size=(n, R_SIZE))
         current = rng.uniform(-1, 1, size=(n, 8))
         stimuli = rng.uniform(0, 1, size=(n, 7))
 
@@ -544,3 +580,305 @@ class TestLongConvergenceStress:
 def soft_clamp_s(x):
     """简单 clamp 到 [-1, 1]。"""
     return np.clip(x, -1.0, 1.0)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 单轮变化率硬上限
+# ═══════════════════════════════════════════════════════════════
+
+class TestPerTurnRateLimit:
+    """验证每轮状态变化不超过安全上限。
+
+    上限基于 500k 极端随机采样的实测 max 并留 50% 余量。
+    这确保任何重构不引入异常跳变。
+    """
+
+    # 内部状态上限（含 50% 安全余量）
+    INTERNAL_LIMITS = {
+        "energy": 0.19, "stress": 0.36, "loneliness": 0.33,
+        "insecurity": 0.28, "irritation": 0.29, "longing": 0.26,
+        "social_battery": 0.21, "mental_fatigue": 0.25,
+    }
+    # 关系状态上限
+    RELATIONSHIP_LIMITS = {
+        "affection": 0.04, "trust_bond": 0.05, "intimacy": 0.04,
+    }
+
+    def test_internal_rate_limits(self, rng):
+        """20,000 组随机输入，内部状态每轮变化不超过上限。"""
+        n = 20_000
+        traits_batch = rng.uniform(-1, 1, (n, T_SIZE))
+        internal_batch = rng.uniform(-1, 1, (n, I_SIZE))
+        rel_batch = rng.uniform(-1, 1, (n, R_SIZE))
+        stimuli_batch = rng.beta(0.5, 0.5, (n, ST_SIZE))
+
+        max_deltas = np.zeros(I_SIZE)
+        for i in range(n):
+            profiles = compute_defense_profiles(
+                traits_batch[i], rel_batch[i], internal_batch[i])
+            inner, _ = apply_defenses(stimuli_batch[i], profiles)
+            new_int = update_internal_state(
+                internal_batch[i], inner, traits_batch[i],
+                rel_batch[i], profiles)
+            delta = np.abs(new_int - internal_batch[i])
+            np.maximum(max_deltas, delta, out=max_deltas)
+
+        for j, name in enumerate(I_LABELS):
+            limit = self.INTERNAL_LIMITS[name]
+            assert max_deltas[j] <= limit, (
+                f"|Δ{name}| = {max_deltas[j]:.4f} > {limit}")
+
+    def test_relationship_rate_limits(self, rng):
+        """20,000 组随机输入，关系状态每轮变化不超过上限。"""
+        n = 20_000
+        traits_batch = rng.uniform(-1, 1, (n, T_SIZE))
+        internal_batch = rng.uniform(-1, 1, (n, I_SIZE))
+        rel_batch = rng.uniform(-1, 1, (n, R_SIZE))
+        stimuli_batch = rng.beta(0.5, 0.5, (n, ST_SIZE))
+
+        max_deltas = np.zeros(R_SIZE)
+        for i in range(n):
+            profiles = compute_defense_profiles(
+                traits_batch[i], rel_batch[i], internal_batch[i])
+            inner, _ = apply_defenses(stimuli_batch[i], profiles)
+            new_rel = update_relationship_state(
+                rel_batch[i], inner, traits_batch[i],
+                current_internal=internal_batch[i])
+            delta = np.abs(new_rel - rel_batch[i])
+            np.maximum(max_deltas, delta, out=max_deltas)
+
+        for j, name in enumerate(R_LABELS):
+            limit = self.RELATIONSHIP_LIMITS[name]
+            assert max_deltas[j] <= limit, (
+                f"|Δ{name}| = {max_deltas[j]:.4f} > {limit}")
+
+    def test_time_scale_separation(self, rng):
+        """关系态变化速度比内部态慢 2 倍以上（α/α_rel 保证）。"""
+        n = 10_000
+        alpha_vals = np.zeros(n)
+        alpha_rel_vals = np.zeros(n)
+        for i in range(n):
+            t = rng.uniform(-1, 1, T_SIZE)
+            rel = rng.uniform(-1, 1, R_SIZE)
+            from state_engine._dynamics_weights import ALPHA_MAPPER, ALPHA_REL_MAPPER
+            alpha = ALPHA_MAPPER.compute(np.concatenate([t, rel]))[0]
+            alpha_rel = ALPHA_REL_MAPPER.compute(np.concatenate([t, rel]))[0]
+            alpha_vals[i] = np.clip(alpha, 0.02, 0.35)
+            alpha_rel_vals[i] = np.clip(alpha_rel, 0.005, 0.06)
+
+        ratio = alpha_vals.mean() / alpha_rel_vals.mean()
+        assert ratio >= 2.0, (
+            f"α/α_rel = {ratio:.1f}x < 2.0x —— 时间尺度分离不足")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 刺激强度单调性
+# ═══════════════════════════════════════════════════════════════
+
+class TestStimulusIntensityMonotonicity:
+    """刺激强度增加 → 受影响的状态维度单调变化。
+
+    只测试 B 矩阵有直接连接的路径，耦合间接路径可能因交互非单调。
+    B 矩阵有 16 条非零连接。
+    """
+
+    # B_int 矩阵的非零连接（来自 _matrices.py）
+    B_PATHS = [
+        (ST_ABANDONMENT, I_INSECURITY),
+        (ST_ABANDONMENT, I_LONELINESS),
+        (ST_ABANDONMENT, I_LONGING),
+        (ST_VALIDATION, I_ENERGY),
+        (ST_VALIDATION, I_INSECURITY),
+        (ST_CLOSENESS, I_ENERGY),
+        (ST_CLOSENESS, I_LONELINESS),
+        (ST_CLOSENESS, I_SOCIAL_BATTERY),
+        (ST_CONFLICT, I_STRESS),
+        (ST_CONFLICT, I_IRRITATION),
+        (ST_CONFLICT, I_ENERGY),
+        (ST_DEPENDENCY, I_SOCIAL_BATTERY),
+        (ST_DEPENDENCY, I_LONELINESS),
+        (ST_TEASING, I_IRRITATION),
+        (ST_EMOTIONAL_WEIGHT, I_STRESS),
+        (ST_EMOTIONAL_WEIGHT, I_MENTAL_FATIGUE),
+    ]
+
+    @pytest.mark.parametrize("stim_idx,state_idx", B_PATHS)
+    def test_internal_monotonic(self, stim_idx, state_idx, rng):
+        """刺激强度单调 → 内部状态变化单调（B 矩阵直连）。"""
+        intensities = np.linspace(0.0, 1.0, 15)
+        deltas = np.zeros(15)
+
+        traits = rng.uniform(-1, 1, T_SIZE)
+        internal = rng.uniform(-1, 1, I_SIZE)
+        rel = rng.uniform(-1, 1, R_SIZE)
+
+        for k, intensity in enumerate(intensities):
+            stimuli = np.zeros(ST_SIZE)
+            stimuli[stim_idx] = intensity
+            profiles = compute_defense_profiles(traits, rel, internal)
+            inner, _ = apply_defenses(stimuli, profiles)
+            new_int = update_internal_state(internal, inner, traits, rel, profiles)
+            deltas[k] = new_int[state_idx] - internal[state_idx]
+
+        # 总效应必须单调（非零 diff 同号）
+        diffs = np.diff(deltas)
+        signs = np.sign(diffs)
+        nonzero = signs[signs != 0]
+        if len(nonzero) > 0:
+            assert np.all(nonzero == nonzero[0]), (
+                f"{ST_LABELS[stim_idx]} → {I_LABELS[state_idx]}: 非单调")
+
+    def test_internal_monotonic_bulk(self, rng):
+        """散弹测试：对所有路径多组随机 trait 验证单调性。"""
+        for stim_idx, state_idx in self.B_PATHS:
+            for _ in range(10):
+                intensities = np.linspace(0.0, 1.0, 10)
+                deltas = np.zeros(10)
+                traits = rng.uniform(-1, 1, T_SIZE)
+                internal = rng.uniform(-1, 1, I_SIZE)
+                rel = rng.uniform(-1, 1, R_SIZE)
+                for k, intensity in enumerate(intensities):
+                    stimuli = np.zeros(ST_SIZE)
+                    stimuli[stim_idx] = intensity
+                    profiles = compute_defense_profiles(traits, rel, internal)
+                    inner, _ = apply_defenses(stimuli, profiles)
+                    new_int = update_internal_state(internal, inner, traits, rel, profiles)
+                    deltas[k] = new_int[state_idx] - internal[state_idx]
+                diffs = np.diff(deltas)
+                signs = np.sign(diffs)
+                nonzero = signs[signs != 0]
+                if len(nonzero) > 0:
+                    assert np.all(nonzero == nonzero[0]), (
+                        f"{ST_LABELS[stim_idx]}→{I_LABELS[state_idx]}: buld 非单调")
+
+    def test_zero_stimulus_no_change(self):
+        """零刺激 → 状态变化极小（仅耦合驱动）。"""
+        internal = DEFAULT_INTERNAL.copy()
+        for _ in range(50):
+            profiles = compute_defense_profiles(
+                DEFAULT_TRAITS, DEFAULT_RELATIONSHIP, internal)
+            inner, _ = apply_defenses(np.zeros(ST_SIZE), profiles)
+            new_int = update_internal_state(
+                internal, inner, DEFAULT_TRAITS,
+                DEFAULT_RELATIONSHIP, profiles)
+            delta = np.max(np.abs(new_int - internal))
+            internal = new_int
+        assert delta < 0.15, f"零刺激下变化过大: {delta:.4f}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 双刺激交互边界
+# ═══════════════════════════════════════════════════════════════
+
+class TestStimulusInteraction:
+    """验证双刺激交互的心理方向正确性。
+
+    交互效应是期望的（如 validation 补偿 abandonment），
+    而非线性 soft_clamp 导致的小幅非加性是可接受的。
+    """
+
+    def test_validation_compensates_abandonment(self, rng):
+        """validation 缓解 abandonment 引起的不安。"""
+        for _ in range(30):
+            t = rng.uniform(-1, 1, T_SIZE)
+            internal = rng.uniform(-0.5, 0.5, I_SIZE)  # 远离边界避免 soft_clamp
+            rel = rng.uniform(-0.5, 0.5, R_SIZE)
+
+            # abandonment 单独
+            sa = np.zeros(ST_SIZE); sa[ST_ABANDONMENT] = 0.7
+            pa = compute_defense_profiles(t, rel, internal)
+            ia, _ = apply_defenses(sa, pa)
+            new_a = update_internal_state(internal, ia, t, rel, pa)
+
+            # abandonment + validation 联合
+            sj = np.zeros(ST_SIZE); sj[ST_ABANDONMENT] = 0.7; sj[ST_VALIDATION] = 0.5
+            pj = compute_defense_profiles(t, rel, internal)
+            ij, _ = apply_defenses(sj, pj)
+            new_j = update_internal_state(internal, ij, t, rel, pj)
+
+            # validation 应缓解不安
+            insecurity_a = new_a[I_INSECURITY] - internal[I_INSECURITY]
+            insecurity_j = new_j[I_INSECURITY] - internal[I_INSECURITY]
+            assert insecurity_j <= insecurity_a + 0.02, (
+                f"validation 未缓解不安: 单独={insecurity_a:.4f}, 联合={insecurity_j:.4f}")
+
+    def test_abandonment_worsens_conflict_stress(self, rng):
+        """abandonment + conflict 联合压力不弱于单独 conflict。"""
+        for _ in range(30):
+            t = rng.uniform(-1, 1, T_SIZE)
+            internal = rng.uniform(-0.5, 0.5, I_SIZE)
+            rel = rng.uniform(-0.5, 0.5, R_SIZE)
+
+            sc = np.zeros(ST_SIZE); sc[ST_CONFLICT] = 0.7
+            pc = compute_defense_profiles(t, rel, internal)
+            ic, _ = apply_defenses(sc, pc)
+            new_c = update_internal_state(internal, ic, t, rel, pc)
+
+            sj = np.zeros(ST_SIZE); sj[ST_CONFLICT] = 0.7; sj[ST_ABANDONMENT] = 0.5
+            pj = compute_defense_profiles(t, rel, internal)
+            ij, _ = apply_defenses(sj, pj)
+            new_j = update_internal_state(internal, ij, t, rel, pj)
+
+            stress_c = new_c[I_STRESS] - internal[I_STRESS]
+            stress_j = new_j[I_STRESS] - internal[I_STRESS]
+            # AT LEAST the same stress as conflict alone
+            assert stress_j >= stress_c - 0.02, (
+                f"联合压力低于单独 conflict: {stress_c:.4f} vs {stress_j:.4f}")
+
+    def test_validation_plus_closeness_boosts_energy(self, rng):
+        """validation + closeness 联合使 energy 上升至少不弱于单独 validation。"""
+        for _ in range(30):
+            t = rng.uniform(-1, 1, T_SIZE)
+            internal = rng.uniform(-0.5, 0.5, I_SIZE)
+            rel = rng.uniform(-0.5, 0.5, R_SIZE)
+
+            sv = np.zeros(ST_SIZE); sv[ST_VALIDATION] = 0.7
+            pv = compute_defense_profiles(t, rel, internal)
+            iv, _ = apply_defenses(sv, pv)
+            new_v = update_internal_state(internal, iv, t, rel, pv)
+
+            sj = np.zeros(ST_SIZE); sj[ST_VALIDATION] = 0.7; sj[ST_CLOSENESS] = 0.5
+            pj = compute_defense_profiles(t, rel, internal)
+            ij, _ = apply_defenses(sj, pj)
+            new_j = update_internal_state(internal, ij, t, rel, pj)
+
+            energy_v = new_v[I_ENERGY] - internal[I_ENERGY]
+            energy_j = new_j[I_ENERGY] - internal[I_ENERGY]
+            assert energy_j >= energy_v - 0.02, (
+                f"联合 energy < 单独 validation: {energy_v:.4f} vs {energy_j:.4f}")
+
+    def test_non_additivity_bounded(self, rng):
+        """屏障测试：非加性偏差不超过 soft_clamp 过渡区宽度。"""
+        violations = 0
+        pairs = [(ST_ABANDONMENT, ST_VALIDATION), (ST_CONFLICT, ST_CLOSENESS)]
+        n_trials = 50
+        for _ in range(n_trials):
+            t = rng.uniform(-1, 1, T_SIZE)
+            internal = rng.uniform(-0.8, 0.8, I_SIZE)  # 充分安全距离
+            rel = rng.uniform(-0.8, 0.8, R_SIZE)
+            for a, b in pairs:
+                for ai, bi in [(0.3, 0.3), (0.5, 0.5)]:
+                    stimuli = np.zeros(ST_SIZE); stimuli[a] = ai; stimuli[b] = bi
+                    profiles = compute_defense_profiles(t, rel, internal)
+                    inner, _ = apply_defenses(stimuli, profiles)
+                    new_j = update_internal_state(internal, inner, t, rel, profiles)
+
+                    sa = np.zeros(ST_SIZE); sa[a] = ai
+                    pa = compute_defense_profiles(t, rel, internal)
+                    ia, _ = apply_defenses(sa, pa)
+                    new_a = update_internal_state(internal, ia, t, rel, pa)
+
+                    sb = np.zeros(ST_SIZE); sb[b] = bi
+                    pb = compute_defense_profiles(t, rel, internal)
+                    ib, _ = apply_defenses(sb, pb)
+                    new_b = update_internal_state(internal, ib, t, rel, pb)
+
+                    dj = new_j - internal
+                    ds = (new_a - internal) + (new_b - internal)
+                    diff = np.max(np.abs(dj - ds))
+                    if diff > 0.10:  # soft_clamp 过渡区 ~0.11
+                        violations += 1
+
+        assert violations / (n_trials * 2 * 2) < 0.10, (
+            f"非加性 >0.1 的比例 {violations}/{(n_trials*2*2)}")
+
