@@ -3,6 +3,8 @@
 > 如何为 State Engine 增加新的防御维度——从理论验证到代码集成。
 >
 > **整合说明**：本文档合并了 DEFENSE_PROFILE_METHODOLOGY.md（扩展流程）+ DEFENSE_PROFILE_INDEPENDENCE_AUDIT.md（独立性审计）。方法论提供标准化流程，审计提供当前实现的独立性验证和对修复效果的评估。
+>
+> **2026-06-22 更新**：Hyperactivation 从纯秩-1 拆分为**人格基线（秩-1, traits+rel 驱动）+ 状态调制（HYPER_STATE_MODULATION, internal→7 维稀疏连接）**。详情见"第二部分"的修复路径更新。
 
 ---
 
@@ -182,19 +184,23 @@ for s in range(ST_SIZE):
 
 **Hyperactivation (过度激活)**
 
-公式：`hyper[s] = σ(5.0 × (raw[s] - 0.38))`, `raw = baseline + trait_dev + global_mod + rel_mod + internal_push`
+公式：`hyper[s] = σ(5.0 × (raw[s] - 0.38))`, `raw = baseline + trait_dev + global_mod + rel_mod + state_delta`
 
-| 刺激维度 | 基线 | 主导特质 (+) | 主导特质 (−) | 关系调制 | 内部推动 |
+| 刺激维度 | 基线 | 主导特质 (+) | 主导特质 (−) | 关系调制 | 状态调制 |
 |---------|------|-------------|-------------|---------|---------|
-| abandonment | 0.45 | ATTACH_ANXIETY(0.55), JEALOUSY(0.30) | — | AFFECTION, ROMANTIC_TENSION (+) | INSECURITY, LONGING (+) |
-| closeness | 0.30 | ATTACH_ANXIETY(0.50) | — | 同上 | 同上 |
-| dependency | 0.35 | ATTACH_ANXIETY(0.40) | — | 同上 | 同上 |
-| validation | 0.15 | ATTACH_ANXIETY(0.20) | — | 同上 | 同上 |
-| conflict | 0.15 | ATTACH_ANXIETY(0.30) | — | 同上 | 同上 |
-| teasing | 0.10 | JEALOUSY(0.20) | — | 同上 | 同上 |
-| emotional_weight | 0.20 | ATTACH_ANXIETY(0.30) | — | 同上 | 同上 |
+| abandonment | 0.45 | ATTACH_ANXIETY(0.55), JEALOUSY(0.30) | — | AFFECTION, INTIMACY (+) | INSECURITY(+0.50), MENTAL_FATIGUE(-0.08) |
+| closeness | 0.30 | ATTACH_ANXIETY(0.50) | — | 同上 | LONELINESS(+0.20), LONGING(+0.25), SOCIAL_BATTERY(+0.15), MENTAL_FATIGUE(-0.10), STRESS(-0.12) |
+| dependency | 0.35 | ATTACH_ANXIETY(0.40) | — | 同上 | LONELINESS(+0.10), LONGING(+0.12), SOCIAL_BATTERY(+0.10) |
+| validation | 0.15 | ATTACH_ANXIETY(0.20) | — | 同上 | STRESS(-0.08) |
+| conflict | 0.15 | ATTACH_ANXIETY(0.30) | — | 同上 | STRESS(+0.20), IRRITATION(+0.30), MENTAL_FATIGUE(-0.10) |
+| teasing | 0.10 | JEALOUSY(0.20) | — | 同上 | IRRITATION(+0.20) |
+| emotional_weight | 0.20 | ATTACH_ANXIETY(0.30) | — | 同上 | — |
 
 全局调制：`+SENSITIVITY×0.08`, `−AVOIDANCE×0.30`
+
+**2026-06-22 更新**：内部状态（insecurity, longing 等）从"全局标量强度推动"改为"维度特异性状态调制"（`HYPER_STATE_MODULATION`），每条连接带心理学 provenance。
+- 优点：支持交叉调制模式（如愤怒→冲突↑亲密↓）
+- 代价：sigmoid 饱和维度（如焦虑型人格的 abandonment）状态调制增量被压缩
 
 ---
 
@@ -232,12 +238,14 @@ relationship = rng.uniform(-1, 1, (n, 6))
 
 #### 根源：信息瓶颈
 
-固定 traits 后，每个剖面 7 维的**所有动态变化**来自仅 2-4 个标量输入源：
+固定 traits 后，每个剖面中人格基线部分的**所有动态变化**来自仅 2-3 个标量输入源：
 
-| 剖面 | 输入源 | 独立自由度 | 输出维 | 瓶颈 |
-|------|-------|:--------:|:-----:|:----:|
+**2026-06-22 更新**：internal 状态不再通过人格基线驱动 hyper，而是通过独立的 `HYPER_STATE_MODULATION`（稀疏 8→7 线性映射）注入。因此 hyper 人格基线的信息瓶颈从"4 源→7 维"降至"2 源→7 维"，但总分维度特异性的自由度提升（状态调制不受 rank-1 约束）。
+
+| 剖面 | 基线输入源 | 独立自由度 | 输出维 | 瓶颈 |
+|------|-----------|:--------:|:-----:|:----:|
 | 去激活 | `trust_bond`（1 个 rel）+ `stress` / `insecurity`（2 个 int） | **3** | 7 | 3→7 |
-| 过度激活 | `affection` / `intimacy`（2 个 rel）+ `insecurity` / `longing`（2 个 int） | **4** | 7 | 4→7 |
+| 过度激活（基线） | `affection` / `intimacy`（2 个 rel） | **2** | 7 | 2→7 |
 
 验证实验——仅变化单一信号源：
 
@@ -290,31 +298,35 @@ TEASING range=0.015 的原因：它对 stress 和 insecurity 的权重均为 0.0
 
 两者的根因相同：**输入信号维度远少于输出维度**。无论权重数组设计得多精细，只要输入源个数 < 输出维数，输出的有效自由度就受限于输入自由度。
 
-### 可选的修复路径
+### 已实施的修复：状态调制（2026-06-22）
 
-#### 路径 A：增加输入源维度（短期）⭐ 推荐
+**路径 A 部分实现**：通过新增 `HYPER_STATE_MODULATION` 将 internal 状态的维度特异性调制独立于人格基线。
 
-当前去激活调制用了 3 个输入（trust_bond、stress、insecurity），但关系态有 6 维、内部态有 8 维：
+修复效果：
 
-| 新增输入 | 应用剖面 | 心理学依据 |
-|---------|--------|-----------|
-| `R_INTIMACY` | 去激活 | 暧昧气氛下防御会变化 |
-| `R_AFFECTION` | 去激活 | 好感降低伪装需求（安全感） |
-| `I_LONELINESS` | 去激活 | 孤独时更渴望联结→降低防御 |
-| `I_ENERGY` | 去激活 | 精力充沛时更敢于面对冲突 |
-| `I_MENTAL_FATIGUE` | 过度激活 | 疲劳时对关系信号的过度反应 |
+| 内部状态 | 影响维度 | 性质 |
+|---------|---------|------|
+| `STRESS` | conflict(+), closeness(-), validation(-) | 交叉调制（威胁↑亲近↓） |
+| `IRRITATION` | conflict(+), teasing(+) | 触发阈值下降 |
+| `INSECURITY` | abandonment(+) | 特异性放大抛弃恐惧 |
+| `LONELINESS` | closeness(+), dependency(+) | 社会重连驱力 |
+| `LONGING` | closeness(+), dependency(+) | 思念驱动趋近 |
+| `SOCIAL_BATTERY` | closeness(+), dependency(+) | 电量决定社交开放度 |
+| `MENTAL_FATIGUE` | abandonment(-), conflict(-), closeness(-) | 疲劳钝化所有反应 |
 
-#### 路径 B：Trait 演化（中期）
+仍在待办列表：
 
-一旦 traits 开始更新，每个剖面就有了 10 个额外的自由度来源。但防御剖面对 traits 的依赖本身是线性且简单（每维仅 1-2 个 trait），真正的改善需要**耦合系数在 trait 空间也具备维度特异性**。
-
-#### 路径 C：语义合并输出维度（远期）
-
-考虑 3 类聚合：威胁类（abandonment + conflict + emotional_weight）、亲近类（closeness + dependency）、社交类（validation + teasing），每个聚合类共享一个防御值。**注意这需要改变 `apply_defenses` 的逐元素乘法语义。**
+| 未实现 | 原因 |
+|--------|------|
+| `R_INTIMACY` → 去激活 | 去激活的状态驱动已验证有效（cos≈0.96），无新增必要 |
+| `R_AFFECTION` → 去激活 | 同上 |
+| `I_LONELINESS` → 去激活 | 孤独通过耦合间接影响去激活 |
+| `I_ENERGY` → 去激活 | 能量影响主要通过 dynamics（α 系数） |
+| Trait 演化 | 约束③禁止 |
 
 ### 各维度独立方差明细
 
-**固定 traits + 随机 internal/rel：**
+**固定 traits + 随机 internal/rel（旧模型数据，仅供参考）：**
 
 | 刺激维度 | 去激活独立方差 | 过度激活独立方差 |
 |----------|:------------:|:---------------:|
@@ -325,6 +337,8 @@ TEASING range=0.015 的原因：它对 stress 和 insecurity 的权重均为 0.0
 | `dependency` | 0.0% | 0.5% |
 | `teasing` | 0.1% | 0.1% |
 | `emotional_weight` | 0.0% | 0.0% |
+
+**2026-06-22 注**：上述表格在旧模型（internal→HYPER_INTENSITY 标量）下计算的。新模型将 internal 从人格基线移至状态调制通道，独立方差不再适用同一定义。状态调制通道的设计目标是**维度特异性**而非方差最大化——这是质的改变，非量的改变。
 
 **审计代码：** `tools/audit_defenses.py`。运行：`uv run python tools/audit_defenses.py`
 

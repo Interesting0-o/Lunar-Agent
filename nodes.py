@@ -120,6 +120,7 @@ def state_engine_node(state: State) -> dict:
         current_relationship=_ensure_array(state.get("relationship_state")),
         traits=traits,
         stimuli=stimuli,
+        prev_surface=_ensure_array(state.get("surface_state")),
     )
 
     # 消费后清理中间数据，避免 checkpoint 残留

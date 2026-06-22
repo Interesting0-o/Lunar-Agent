@@ -32,7 +32,7 @@ Lunar 是一个基于 Bowlby 依恋理论的防御驱动型状态引擎，目前
 | 4 | 🔴 | **记忆系统 stub** | 未完成集成 | LangGraph 管线 |
 | 5 | 🔴 | **SurfaceState 未注入 LLM** | 设计遗落 | 核心功能 |
 | 6 | 🔴 | **无 Appraisal 层** | 仅 7 维刺激不够 | 感知系统 |
-| 7 | 🔴 | **约束框架未实施**（8/9 条违反） | 宪法先行于代码 | 架构治理 |
+| 7 | 🟡 | **约束框架部分实施**（⑤✅ ⑧✅，其余仍违反） | WeightMapper/ConstraintRegistry 骨架已实现 | 架构治理 |
 | 8 | 🟡 | **扁平动力学架构** | 统一 dt=1，无快慢分离 | 动力学 |
 | 9 | 🟡 | **无目标/意图系统** | 纯被动 | 行为系统 |
 | 10 | 🟡 | **无 UserModel** | 未开发 | 角色交互 |
@@ -426,7 +426,7 @@ STATE_ENGINE_CONSTRAINTS.md 的 9 条约束中，当前实际遵守仅 1 条（�
 1. **约束⑤ WeightMapper**：在 `state_engine/_validator.py` 中实现（1d）。将 `_matrices.py` 中的裸数字改由 WeightMapper 管理
 2. **约束⑨ 全局雅可比稀疏**：实现组合雅可比检查（1d）。验证管道级边密度 ≤ 30%
 3. **约束③ 矩阵低秩**：为所有矩阵添加有效秩检查和预期秩注释（0.5d）
-4. **约束①/④**：作为语义重构的副产品自动修复（Surface 读 Internal 的问题）
+4. **约束①/④**：**已修复（06-22 Surface 重构）** — traits 从 surface 移除，outer_stimuli 确认为 defenses 压抑后输入
 
 ### 5.9 方案 H（P1）：记忆系统集成
 

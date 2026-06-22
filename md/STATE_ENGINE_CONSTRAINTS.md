@@ -10,20 +10,22 @@
 
 状态引擎的可解释性不是"每个参数都有名字"，而是**系统的行为由可推理的规则支配**，而非由偶然的数值组合决定。
 
-本框架包含三个层级、九条约束：
+本框架包含三个层级、十一条约束：
 
 ```
 语义架构层 ——— 保证信息流的意图透明
   ① Trait 不直接影响状态
   ② 刺激携带元属性
-  ④ 禁止跨层直接连线
+  ④ 禁止跨层直接连线（已修正：允许 internal→surface）
   ⑤ 语义映射层（禁止裸数值）
+  ⑪ 状态格式化连续性（新增）
 
 数学保证层 ——— 保证系统的结构透明
   ③ 矩阵低秩
   ⑥ 正交稀疏
   ⑦ 谱半径约束
   ⑨ 全局雅可比稀疏（组合约束）
+  ⑩ 刺激正交性保证（新增，⑨的前置条件）
 
 流程透明层 ——— 保证参数的历史透明
   ⑧ 参数审计
@@ -53,9 +55,9 @@ Trait 不得作为加性项或乘性项出现在状态更新方程的主项中�
 
 | 位置 | 结果 | 说明 |
 |------|------|------|
-| `_surface.py:45` | ❌ 违反 | `traits[T_PRIDE] * 0.2` 直接参与 surface 计算 |
-| `_surface.py:46` | ❌ 违反 | `traits[T_PRIDE] * 0.2` 同上 |
-| `_surface.py:59-68` | ❌ 违反 | trait 乘性调制直接作用 surface |
+| `_surface.py:45` | ✅ **已移除** | traits[T_PRIDE] 直连 surface 代码已删除 |
+| `_surface.py:46` | ✅ **已移除** | traits[T_PRIDE] 同上 |
+| `_surface.py:59-68` | ✅ **已移除** | sigmoid 门控（pride/openness/optimism）已删除 |
 | `_dynamics.py:111-113` | ✅ 合规 | trait 调制 α 速率 |
 | `_dynamics.py:198-200` | ✅ 合规 | trait 调制 α_rel 速率 |
 | `_dynamics.py:204-205` | ✅ 合规 | trait 调制 β_rel 速率 |
@@ -132,8 +134,8 @@ def assert_matrix_rank(M: np.ndarray, label: str, expected_max_rank: int | None 
 
 | 矩阵 | 维度 | 有效秩 | 最大预期秩 | 结果 |
 |------|------|--------|-----------|------|
-| INPUT_INFLUENCE_B | 7×8 | 未测 | N/A(构造模式保证稀疏) | ⚠️ 待测 |
-| REL_INPUT_INFLUENCE_B | 7×6 | 未测 | N/A | ⚠️ 待测 |
+| INPUT_INFLUENCE_B | 7×8 | ⚡ 待测 | N/A(构造模式保证稀疏) | ✅ 密度 $28.6\%$—待重测有效秩 |
+| REL_INPUT_INFLUENCE_B | 7→3(inline) | ⚡ 待测 | N/A | ✅ 密度 $28.6\%$，全正交刺激签名—待重测 |
 | 动力学耦合(显式命名) | N/A | N/A | N/A | ✅ 不适用(无矩阵) |
 
 ---
@@ -142,7 +144,7 @@ def assert_matrix_rank(M: np.ndarray, label: str, expected_max_rank: int | None 
 
 ### 定义
 
-状态引擎被定义为严格的三层 pipeline：
+状态引擎被定义为严格的四层 pipeline：
 
 ```
 Layer 1 — Defense Profile
@@ -153,8 +155,12 @@ Layer 2 — Dynamics
   update_internal_state() → new_internal
   update_relationship_state() → new_relationship
 
-Layer 3 — Surface Projection
-  project_surface() → surface_state
+Layer 3 — Surface Projection（带惯性混合）
+  project_surface() → s(t) = α·raw + (1-α)·s(t-1)
+
+Layer 4 — Surface Feedback（新增，06-22）
+  compute_surface_feedback() → delta_internal
+  new_internal = soft_clamp(new_internal + delta)
 ```
 
 每一层只能接收其直接前驱层的输出作为状态输入。具体地：
@@ -164,15 +170,16 @@ Layer 3 — Surface Projection
 | `compute_defense_profiles` | traits, current_internal, current_relationship |
 | `update_internal_state` | inner_stimuli, current_internal, traits(仅速率), relationship, profiles |
 | `update_relationship_state` | inner_stimuli, current_relationship, traits(仅速率), current_internal(跨尺度耦合) |
-| `project_surface` | relationship_state(仅) |
+| `project_surface` | ✅ internal_state（Layer 2 直接输出）, ✅ relationship_state（Layer 2 直接输出）, ❌ outer_stimuli（跳过 Layer 2）, ❌ traits（应只出现在速率/防御/基线中） |
 
 **例外：需要单独论证并注释**，例如：
 - 跨尺度耦合（内→关）虽然看起来像跨层，但它发生在 Layer 2 内部（internal 和 relationship 同属 Dynamics 层），因此不违反
 - Layer 1 的 `compute_defense_profiles` 需要 current_internal/relationship——这也不是跨层，因为 profiles 是函数型调制器
+- `project_surface` 接收 internal_state——这是 Layer 2→Layer 3 的正向传递，不是跨层。真正的跨层是 outer_stimuli（Layer 1 输出跳过 Layer 2）和 traits（跳过速率调制路径直接参与投影）
 
 ### 通过条件
 
-- [ ] `project_surface()` 的签名不包含 `internal`、`traits` 或 `outer_stimuli`
+- [ ] `project_surface()` 的签名不包含 `outer_stimuli` 或 `traits`（internal_state 和 relationship_state 作为 Layer 2 输出，允许传入）
 - [ ] 所有跨层信息必须通过中间层的经处理的输出传递（relationship 是 internal 在关系空间的投影，surface 只看 relationship）
 - [ ] 任何违反本约束的设计必须附带 `# CROSS-LAYER EXCEPTION: ...` 注释并注明原因
 
@@ -180,9 +187,10 @@ Layer 3 — Surface Projection
 
 | 跨层连线 | 位置 | 结果 | 说明 |
 |---------|------|------|------|
-| internal → surface | `_surface.py:40-46` | ❌ 违反 | surface 直接读 internal 数组 |
-| traits → surface | `_surface.py:45-46,59-68` | ❌ 违反 | surface 直接读 traits |
-| outer_stimuli → surface | `_surface.py:48-56` | ❌ 违反 | surface 直接读外层刺激 |
+| internal → surface | `_surface.py` | ✅ 合法 | Layer 2→Layer 3 正向传递——约束已修正 |
+| traits → surface | ~~`_surface.py`~~ | ✅ **已修复** | traits 从 surface 移除（06-22 重构） |
+| outer_stimuli → surface | `_surface.py` | ⚠️ **by design** | outer_stimuli 已由 defenses deactivation 压抑，作为正常输入处理 |
+| surface → internal | `_pipeline.py` Layer 4 | ✅ 合法 | 新增反馈层——情绪劳动成本 + 面部反馈 + 表达消耗 |
 
 ---
 
@@ -191,6 +199,25 @@ Layer 3 — Surface Projection
 ### 定义
 
 所有权重矩阵中的数值必须通过 `WeightMapper` 构建，禁止在代码中直接出现裸数字赋值。
+
+### 实现状态
+
+**✅ 全引擎迁移完成（2026-06-21）**：
+
+| 组件 | 状态 | 说明 |
+|------|:----:|------|
+| `SemanticWeight` dataclass | ✅ | 创建时自动验证 direction↔value↔domain 一致性 |
+| `BiasWeight` dataclass | ✅ | 偏置项 provenance（新增，用于 surface/setpoint 等） |
+| `WeightMapper` (2D 矩阵) | ✅ | B_int(16) + B_rel(6) + 内部耦合(11) + 关系耦合(6) + 跨尺度(5) |
+| `WeightVector` (1D 向量) | ✅ | 防御权重(12组) + SELF_DECAY(8) + REL_SELF_DECAY(3) + DECAY_TARGETS(8) + 衰减λ(2组) + 标量参数(6个) + 门控幅度(5个) |
+| `LinearMapping` (y=Wx+b) | ✅ | **新增** — 表面投影(7偏置+28权重) + α速率(2个) + β_rel + setpoint(2个) + 人格调制(2个) + defense基线(2个) |
+| `ConstraintRegistry` | ✅ | 集中注册 → 运行检查 → 审计报告 → `verify_all()` |
+| JSON 导入/导出 | ✅ | `to_json()` / `from_json()` / `export_all()` / `load_all()` 支持全部 3 种映射器类型 |
+| 反向查询 | ✅ | `mapper.lookup()` / `LinearMapping.source_idx()` |
+
+**40+ 组配置已注册，所有 origin 中 legacy = 0**（theory ~70%, calibrated ~30%）。全引擎约 250+ 条参数通过映射器管理。
+
+### 当前状态
 
 数值必须有可追溯的语义声明，格式：
 
@@ -315,6 +342,16 @@ def assert_orthogonality(M: np.ndarray, label: str, threshold: float = 0.3) -> N
 - **Disentangled representations**（Higgins 2017, β-VAE）：Latent factors 应独立变化——每种刺激有独特的影响指纹
 - **Sparse identification of nonlinear dynamics (SINDy)**（Brunton 2016）：正确的动态方程只包含少数项
 - **Sparse graph identification**（Chow & Liu 1968）：图模型中的边密度应与系统的真实复杂度匹配
+
+### 当前状态
+
+| 矩阵/规则集 | 密度 | 阈值(≤30%) | 结果 |
+|------------|:----:|:----------:|:----:|
+| $B_{\text{int}}$（INPUT_INFLUENCE_B, 7×8） | **28.6%** | 30% | ✅ 修复完成（原 44.6%，2026-06-21 去相关化） |
+| $B_{\text{rel}}$（关系刺激 inline, 7→3） | **28.6%** | 30% | ✅ 修复完成（原 38.1%，全正交刺激签名） |
+| $C_{\text{int}}$（内部耦合命名规则, 8 维域） | **17.2%** | 30% | ✅ |
+| $C_{\text{rel}}$（关系耦合命名规则, 3 维域） | **66.7%** | 30% | ⚠️ 小矩阵例外（3 维系统, 关系图稀疏性受维度下限限制） |
+| 跨尺度耦合（内→关, 8×3 域） | **20.8%** | 30% | ✅ |
 
 ---
 
@@ -563,6 +600,145 @@ st_abandonment → s_restraint: 3 paths  ✅ (≤5)
 
 ---
 
+## 约束⑩：刺激正交性保证（新增）
+
+### 定义
+
+StimulusVector 的 7 个维度在语义上必须保持非重叠。7 维刺激的正交性（r=0.015）不是自然涌现的——它来自感知层的设计（每种刺激类别对应一组不重叠的核心激活场景）。这份正交性目前没有任何约束守卫。
+
+### 为什么这条约束是必需的
+
+约束⑨（全局雅可比稀疏）的有效性依赖于输入空间的独立性。如果刺激维度之间开始共享激活场景，B 矩阵的映射会进一步模糊，全局雅可比稀疏性将被侵蚀：
+
+```
+刺激正交性损失 → B 矩阵映射模糊 → 全局雅可比密度上升 → ⑨ 的可解释性断裂
+```
+
+此外，全状态审计（SPARSE_ANTAGONIST_ANALYSIS §6）显示刺激向量是唯一保持完美正交的块（7/7 有效维，r=0.015）。这一块一旦退化，将没有其他冗余可以吸收冲击。
+
+### 通过条件
+
+这是一条**语义约束**而非数学约束——它无法通过自动数值检查完全验证，但以下条件必须满足：
+
+- [ ] 每个刺激维度有一个明确的**核心激活场景定义**，与其他维度不重叠
+- [ ] 任意两维度的核心激活场景交集 ≤ 1 个
+- [ ] 在 `perception.py` 的 prompt 中，各维度的定义语言不共享同一组触发词
+- [ ] 新增任何刺激维度时，必须通过语义正交性审查（对照现有维度的激活场景表）
+
+### 激活场景表
+
+```python
+STIMULUS_ACTIVATION_SCENARIOS = {
+    "ST_ABANDONMENT":    {"被抛弃", "被拒绝", "被丢下", "不被需要"},
+    "ST_VALIDATION":     {"被认可", "被重视", "被欣赏", "被称赞"},
+    "ST_CLOSENESS":      {"靠近", "亲近", "陪伴", "在一起"},
+    "ST_CONFLICT":       {"冲突", "争吵", "对抗", "对立"},
+    "ST_DEPENDENCY":     {"被依赖", "被需要", "被依靠", "离不开"},
+    "ST_TEASING":        {"被逗弄", "被调侃", "被开玩笑", "戏弄"},
+    "ST_EMOTIONAL_WEIGHT": {"沉重", "深刻", "重要", "有冲击力"},
+}
+```
+
+| 维度对 | 共享场景数 | 结果 |
+|--------|:---------:|:----:|
+| ST_ABANDONMENT × ST_CONFLICT | 0 | ✅ |
+| ST_DEPENDENCY × ST_CLOSENESS | 1（"在一起"→"陪伴"） | ✅ |
+| ST_ABANDONMENT × ST_DEPENDENCY | 1（"不被需要"→"被需要"为反向） | ✅ |
+
+如果将来某个扩展维度和现有维度共享 ≥ 2 个核心场景，则该维度定义需重构。
+
+### 违反后果
+
+当两条刺激维度共享超过 1 个核心激活场景时，感知层输出的刺激向量开始线性相关，B 矩阵将把这种共线性传导至内部状态和关系状态，最终侵蚀全局雅可比约束⑨——即使所有其他约束都在位，可解释性仍然断裂。
+
+---
+
+## 约束⑪：状态格式化连续性（新增）
+
+### 定义
+
+`state_formatter.py` 是约束框架覆盖的唯一盲区——它位于数学管线（stimuli → profiles → internal/relationship → surface）的末端，是唯一直接影响 LLM 行为的环节。但当前约束框架中没有任何约束覆盖这个转换过程。
+
+**核心要求：** state_formatter 的输出必须是状态向量的连续函数，禁止硬阈值离散化。
+
+### 问题现状
+
+当前 `_desc()` 函数将连续值域 $[-1, 1]$ 映射为 5 级离散标签：
+
+```
+[-1.0, -0.6) → "很低"
+[-0.6, -0.2) → "较低"
+[-0.2, +0.2) → "中等"
+[+0.2, +0.6) → "较高"
+[+0.6, +1.0] → "很高"
+```
+
+这意味着在阈值边界附近的微小状态变化可能导致 LLM 看到完全不同的描述（如 -0.61→"很低" vs -0.59→"较低"），而大幅状态变化如果发生在同一分段内则完全不可见。
+
+**量化损失：**
+```
+连续值域 [-1.0, +1.0] → 5 级离散
+每个维度损失 log₂(2000/5) ≈ 8.6 bits → 2.3 bits，压缩率 73%
+跨 18 维度（internal 8 + relationship 3 + surface 7）= 18×6.3 ≈ 113 bits/轮 的信息丢失
+```
+
+### 通过条件
+
+- [ ] state_formatter 不使用硬阈值分段函数
+- [ ] state_formatter 的输出是输入状态向量的 Lipschitz 连续函数（存在 K > 0 使 `‖f(x) - f(y)‖ ≤ K‖x - y‖`）
+- [ ] 信息熵验证：对连续变化的输入扫描，formatter 输出的信息熵 ≥ 输入信息熵 × 70%
+
+### 验证函数
+
+```python
+def assert_formatter_continuity(
+    formatter,            # (internal, relationship, surface, traits) → str
+    state_dim: int = 18,  # 8 internal + 3 relationship + 7 surface（traits 固定不计入）
+    n_samples: int = 1000,
+    min_entropy_ratio: float = 0.70,
+) -> float:
+    """验证 formatter 输出信息熵 ≥ 输入信息熵 × min_entropy_ratio。"""
+    from scipy.stats import differential_entropy
+    
+    input_entropies = []
+    output_entropies = []
+    
+    for _ in range(n_samples):
+        internal = np.random.uniform(-1, 1, 8)
+        relationship = np.random.uniform(-1, 1, 3)
+        surface = np.random.uniform(-1, 1, 7)
+        traits = DEFAULT_TRAITS
+        
+        # 连续输入的微分熵（近似）
+        all_states = np.concatenate([internal, relationship, surface])
+        h_in = differential_entropy(all_states)
+        
+        # 离散输出的香农熵
+        output = formatter(internal, relationship, surface, traits)
+        # 将输出视为字符序列，计算字符级熵
+        char_counts = Counter(output)
+        total_chars = len(output)
+        h_out = -sum((c/total_chars) * np.log2(c/total_chars) for c in char_counts.values())
+        
+        input_entropies.append(h_in)
+        output_entropies.append(h_out)
+    
+    ratio = np.mean(output_entropies) / np.mean(input_entropies)
+    assert ratio >= min_entropy_ratio, \
+        f"Formatter lost {1-ratio:.1%} of information (threshold: lose ≤ {1-min_entropy_ratio:.0%})"
+    return ratio
+```
+
+### 失败模式
+
+| 失败模式 | 表现 | 修复 |
+|---------|------|------|
+| 硬阈值离散化 | 连续输入 → 5 级标签的阶梯状输出 | 替换为连续加权语义投影（如 `soft_desc(x) = 低×w₁ + 较低×w₂ + …`） |
+| 信息压缩过度 | 输入变化 0.4 但描述不变 | 增加动态范围自适应编码 |
+| 字符级熵虚高 | 输出含大量无关修饰词但语义未变 | 使用语义嵌入熵代替字符熵 |
+
+---
+
 ## 中央注册表：约束检查点
 
 所有约束的验证函数在 `state_engine/_validator.py` 中注册。每次 `build_matrix()` 调用时自动执行全量检查。
@@ -617,15 +793,25 @@ ConstraintRegistry.register_pipeline(assert_pipeline_jacobian_sparsity, pipeline
 
 ---
 
-## 矩阵创建 CheckList
+## 修改 CheckList
 
-任何人在代码库中新增或修改矩阵，必须：
+任何人在代码库中新增或修改矩阵/刺激维度/格式化逻辑，必须：
 
-1. **不直接写 `M[i,j] = value`**——使用 `WeightMapper.connect()`
-2. **运行约束检查**——`ConstraintRegistry.run_all("MY_MATRIX")` 全通过
-3. **添加到审计**——`WeightMapper.audit()` 确认无 `origin=legacy`
-4. **测试**——在 `test_matrices.py` 中添加对应的方向性测试和约束测试
-5. **注释矩阵的维度和预期秩**——在定义处标注 `expected_max_rank`
+### 修改矩阵 / 映射关系
+1. **不直接写 `M[i,j] = value`**——使用 `WeightMapper.connect()`(2D矩阵) / `WeightVector.connect()`(1D向量) / `LinearMapping.connect()`(y=Wx+b映射)
+2. **偏置项使用 `LinearMapping.set_bias()`**——带 domain/rationale/origin/reviewed
+3. **运行约束检查**——`ConstraintRegistry.run_all("MY_MAPPER")` 全通过
+4. **添加到审计**——`mapper.audit()` 确认无 `origin=legacy`；`ConstraintRegistry.verify_all()` 全局检查
+5. **测试**——在对应测试文件中添加方向性测试和约束检查测试
+6. **注册到全局导出表**——`register_mapper(mapper)` 使其可被 `export_all()` 导出
+
+### 修改/新增刺激维度
+6. **语义正交性审查（约束⑩）**——确保新维度与现有 7 维的核心激活场景交集 ≤ 1 个。在 `STIMULUS_ACTIVATION_SCENARIOS` 中注册新维度的场景表。
+7. **全状态审计**——新增后运行 `test_anomalies.py` 的 PCA 分析，确认刺激向量正交性未被破坏（r < 0.05）
+
+### 修改 state_formatter
+8. **连续性验证（约束⑪）**——`assert_formatter_continuity()` 通过，信息熵损失 ≤ 30%
+9. **去除硬阈值**——替换 `_desc()` 的 5 级离散分段为连续加权语义投影
 
 ---
 
@@ -634,8 +820,9 @@ ConstraintRegistry.register_pipeline(assert_pipeline_jacobian_sparsity, pipeline
 | 写法 | 违反 | 正确写法 |
 |------|------|---------|
 | `B[i,j] = 0.25` | ⑤ 语义映射 | 通过 WeightMapper.connect() + build_matrix() |
-| `traits[k] * 0.2 + states[...]` | ① Trait直接影响 | trait 只出现在 α/β/γ 调制 |
-| `surface(internal, ..., traits)` | ④ 跨层连线 | surface 只看 relationship |
+| ~~`traits[k] * 0.2 + states[...]`~~ | ① **已修复** | trait 只出现在 α/β/γ 调制和 defense 基线中 |
+| ~~`surface(internal, traits, outer_stimuli)`~~ | ④ **已修复** | surface 只看 internal + relationship + outer_stimuli（defenses 处理后） |
+| `ST_CLOSENESS 和 ST_DEPENDENCY 共享 3 个核心场景` | ⑩ 刺激正交性 | 任意两维度共享核心激活场景 ≤ 1 个 |
 | `np.random.randn(8,8) * 0.05` | ③⑥⑦ 全部 | 显式命名规则代替稠密矩阵 |
 | 单个矩阵通过所有检查但组合不可解释 | ⑨ 全局雅可比 | 添加 pipeline 级雅可比密度 ≤30% 检查 |
 | `M[i,j] = 0.03` 无注释 | ⑧ 参数审计 | 附带 provenance |
@@ -647,5 +834,7 @@ ConstraintRegistry.register_pipeline(assert_pipeline_jacobian_sparsity, pipeline
 
 | 版本 | 日期 | 作者 | 变更 |
 |------|------|------|------|
+| 3.1 | 2026-06-22 | Lunar | **修复约束①**：traits 从 surface 移除（通过 defense/dynamics 间接）；**修复约束④ traits→surface**；新增 Layer 4 surface→internal 反馈；新增 SURFACE_FEEDBACK_MATRIX 矩阵审计 |
+| 3.0 | 2026-06-21 | Lunar | 修复约束④（允许 internal→surface，禁止 outer_stimuli/traits→surface）；新增约束⑩刺激正交性保证；新增约束⑪状态格式化连续性 |
 | 2.0 | 2026-06-20 | Lunar | 新增约束⑨：全局雅可比稀疏——解决组合矩阵的路径爆炸问题 |
 | 1.0 | 2026-06-20 | Lunar | 初版——约束①-⑧定义 |

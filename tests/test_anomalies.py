@@ -423,14 +423,13 @@ class TestAnomalySurfaceDegeneracy:
         n = 50_000
         internal = rng.uniform(-1, 1, size=(n, 8))
         relationship = rng.uniform(-1, 1, size=(n, R_SIZE))
-        traits = rng.uniform(-1, 1, size=(n, 10))
-        outer = rng.uniform(-1, 1, size=(n, 7))
+        outer = rng.uniform(0, 1, size=(n, 7))  # outer 已由 deactivation 压抑至 [0, 1]
 
         floor_counts = np.zeros(S_SIZE)
         ceil_counts = np.zeros(S_SIZE)
 
         for i in range(n):
-            s = project_surface(internal[i], relationship[i], traits[i], outer[i])
+            s = project_surface(internal[i], relationship[i], outer[i])
             floor_counts += (s < -0.99).astype(int)
             ceil_counts += (s > 0.99).astype(int)
 

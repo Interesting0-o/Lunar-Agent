@@ -135,9 +135,9 @@ outer = stimuli * (1.0 + hyper * alpha_hyper) * (1.0 - deact * alpha_deact)
 | 层 | 维数 | 是否独立状态？ | 理由 |
 |---|:----:|:-------------:|------|
 | InternalState | 8 | ✅ 主状态变量 | 每轮随刺激变化 |
-| RelationshipState | 6 | ✅ 主状态变量（慢尺度） | 跨轮累积 |
-| SurfaceState | 7 | ❌ 确定性投影 | 确定函数，非独立自由度 |
-| Traits | 10 | ❌ 会话内常量 | 不随状态变化 |
+| RelationshipState | 3 | ✅ 主状态变量（慢尺度） | 跨轮累积 |
+| SurfaceState | 7 | **🔄 混合状态（06-22 重构）** | **有惯性 `s(t)=α·raw+(1-α)·s(t-1)`，产生反馈到 internal** |
+| Traits | 10 | ❌ 会话内常量 | 不随状态变化（待演化） |
 | StimulusVector | 7 | ❌ 外部输入 | 驱动而非记忆 |
 
 **有效状态空间维度 = 14 维（8 内部 + 6 关系）**。进一步考虑双时间尺度分离，单次对话窗口内实际有效自由度 ≈ 内部 8 维。

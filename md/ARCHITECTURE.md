@@ -1,12 +1,12 @@
 # Lunar 状态引擎架构
 
-> 2026-06-21 | 基于代码 v2.0 实际状态 | 5 节点 LangGraph | defense-based 残差动力学 | 记忆系统已集成
+> 2026-06-22 | Surface 重构完成（惯性更新+双向耦合+traits间接化）| 5 节点 LangGraph | defense-based 残差动力学 | 记忆系统已集成
 
 ---
 
 ## 一、系统总览
 
-Lunar 是一个基于 LangGraph 的 AI 角色扮演引擎。用**计算心理学状态机**替代传统 prompt-based 角色扮演，核心是一个 Bowlby 依恋防御驱动的三阶段状态引擎。
+Lunar 是一个基于 LangGraph 的 AI 角色扮演引擎。用**计算心理学状态机**替代传统 prompt-based 角色扮演，核心是一个 Bowlby 依恋防御驱动的四阶段状态引擎。
 
 ### 1.1 技术栈
 
@@ -40,7 +40,8 @@ START
               state_engine_node
                 ① Defense Profiles (Bowlby)
                 ② Residual Dynamics
-                ③ Surface Projection
+                ③ Surface Projection (惯性混合)
+                ④ Surface → Internal Feedback
                 + 清除 user_stimuli
                       │
                       ▼
@@ -68,7 +69,7 @@ START
 | StimulusVector | 7 | $[0, 1]$ | 每轮，node 内 | ❌ 消费后清除 |
 | InternalState | 8 | $[-1, 1]$ | 跨轮持续 | ✅ |
 | RelationshipState | 3 | $[-1, 1]$ | 跨轮持续 | ✅ |
-| SurfaceState | 7 | $[-1, 1]$ | 每轮重算 | ⚠️ 不注入 LLM |
+| SurfaceState | 7 | $[-1, 1]$ | 每轮重算 | ✅ 注入 LLM（经 state_formatter） |
 | Traits | 10 | $[-1, 1]$ | 固定（待演化） | ✅ |
 
 ### 2.2 StimulusVector — 心理刺激（7 维）
@@ -175,7 +176,7 @@ $$
 
 ---
 
-## 四、状态引擎（三阶段管线）
+## 四、状态引擎（四阶段管线）
 
 ### 4.1 总公式
 
@@ -204,20 +205,25 @@ $$
 \text{profiles}[0] = \sigma\bigl(5.0 \cdot (\text{deact} - 0.35)\bigr)
 $$
 
-#### 过度激活（Hyperactivation）— 放大内心感受
+#### 过度激活（Hyperactivation）— 放大内心感受（含状态调制）
 
 $$
 \begin{aligned}
-\text{hyper}[d] &= \text{baseline}[d] \\
-&\quad + \sum_{t} \tau_t \cdot W_{t,d}^{\text{hyper},A} \\
-&\quad \times \bigl(1 + r_{\text{aff}} \cdot W_{d}^{\text{aff},M} + r_{\text{int}} \cdot W_{d}^{\text{int},M}\bigr) \\
-&\quad + i_{\text{insec}} \cdot W_{d}^{\text{insec},A} + i_{\text{long}} \cdot W_{d}^{\text{long},A}
+\text{hyper}[d] &= \underbrace{\text{baseline}[d] + \sum_{t} \tau_t \cdot W_{t,d}^{\text{hyper},A} \times \bigl(1 + r_{\text{aff}} \cdot W_{d}^{\text{aff},M} + r_{\text{int}} \cdot W_{d}^{\text{int},M}\bigr)}_{\text{人格基线（秩-1, 仅 traits+rel）}} \\
+&\quad + \underbrace{\sum_{s \in \text{internal}} i_s \cdot M_{s,d}^{\text{state}}}_{\text{状态调制（稀疏维度特异性）}} &&\text{(2026-06-22 新增)}
 \end{aligned}
 $$
 
 $$
 \text{profiles}[1] = \sigma\bigl(5.0 \cdot (\text{hyper} - 0.38)\bigr)
 $$
+
+**2026-06-22 更新**：原有的纯秩-1 模型（internal 作为标量强度输入）被拆分为两个独立通道：
+
+1. **人格基线**（秩-1）：traits + relationship → 标量强度 × PC1_DIR（internal 不再参与）
+2. **状态调制**（新增）：internal 状态通过 `HYPER_STATE_MODULATION` 稀疏连接（每条有心理学 provenance）直接驱动特定 hyper 维度
+
+拆分的动因：PCA 审计发现人格差异和情绪状态差异对 hyper 方差贡献的方向不一致（PC1 夹角 142°），秩-1 模型强制两者同步是错误的。新模型允许"愤怒→冲突↑且亲密↓"等交叉调制模式。
 
 #### 防御应用
 
@@ -286,7 +292,7 @@ $$
 \Delta_{\text{stimulus}} = (\beta_{\text{stim}} \odot s_{\text{inner}})^{\mathsf{T}} \cdot B_{\text{int}}
 $$
 
-$B_{\text{int}} \in \mathbb{R}^{7 \times 8}$ 密度 $44.6\%$。
+$B_{\text{int}} \in \mathbb{R}^{7 \times 8}$ 密度 $28.6\%$（2026-06-21 去相关化，原 $44.6\%$）。
 
 **完整更新：**
 
@@ -328,7 +334,7 @@ $$
 \end{aligned}
 $$
 
-**去相关刺激 B 矩阵（2026-06-21）：**
+**去相关刺激 B 矩阵（2026-06-21，约束⑥/⑩/⑤ 合规）：**
 
 每维关系态接收不重叠的刺激签名：
 
@@ -336,10 +342,11 @@ $$
 \begin{aligned}
 \Delta r_{\text{affection}} &= 0.18 \cdot s_{\text{validation}} + 0.10 \cdot s_{\text{closeness}} \\
 \Delta r_{\text{trust}} &= -0.25 \cdot s_{\text{conflict}} - 0.10 \cdot s_{\text{abandonment}} \\
-\Delta r_{\text{intimacy}} &= 0.08 \cdot s_{\text{closeness}} + 0.15 \cdot s_{\text{dependency}} \\
-&\quad + 0.10 \cdot s_{\text{teasing}} + 0.08 \cdot s_{\text{emotional\_weight}}
+\Delta r_{\text{intimacy}} &= 0.15 \cdot s_{\text{dependency}} + 0.10 \cdot s_{\text{teasing}}
 \end{aligned}
 $$
+
+密度 $6/21 = 28.6\%$（原 $38.1\%$），零共享刺激维度，全正交签名。
 
 **自阻尼：**
 
@@ -357,9 +364,16 @@ r_t &= \text{soft\_clamp}(r_{t-1} + \Delta t \cdot (\alpha_{\text{rel}} \cdot \D
 \end{aligned}
 $$
 
-### 4.4 表面投影
+### 4.4 表面投影（带惯性混合）
 
-#### 内部基线 + 外部刺激 + 特质修饰
+#### 设计原则（2026-06-22 重构）
+
+- **traits 不直接作为输入**——traits 通过 defense profiles + dynamics 间接影响 surface
+- **惯性混合**：`s(t) = α·raw(t) + (1-α)·s(t-1)`，α 由内部状态动态计算
+- **双向耦合**：surface → internal 反馈（情绪劳动成本 + 面部反馈 + 表达消耗）
+- **outer_stimuli 已是门控产物**——deactivation 已压抑外向通道，surface 直接使用
+
+#### 线性基线 + 惯性混合
 
 $$
 \begin{aligned}
@@ -370,34 +384,40 @@ s_{\text{sharpness}} &= -0.1 + 0.5 \cdot i_{\text{irritation}} + 0.15 \cdot i_{\
 &\quad + 0.25 \cdot s_{\text{conflict}} + 0.10 \cdot s_{\text{teasing}} \\
 s_{\text{softness}} &= -0.1 + 0.2 \cdot r_{\text{trust}} + 0.20 \cdot s_{\text{closeness}} \\
 s_{\text{enthusiasm}} &= -0.2 + 0.5 \cdot i_{\text{energy}} - 0.15 \cdot i_{\text{fatigue}} + 0.15 \cdot s_{\text{validation}} \\
-s_{\text{restraint}} &= -0.1 + 0.3 \cdot i_{\text{insecurity}} + 0.20 \cdot \tau_{\text{pride}} + 0.20 \cdot i_{\text{stress}} \\
+s_{\text{restraint}} &= -0.1 + 0.3 \cdot i_{\text{insecurity}} + 0.20 \cdot i_{\text{stress}} \\
 &\quad + 0.20 \cdot s_{\text{emotional\_weight}} \\
-s_{\text{vulnerability}} &= -0.5 + 0.3 \cdot i_{\text{loneliness}} + 0.2 \cdot i_{\text{longing}} - 0.20 \cdot \tau_{\text{pride}} \\
+s_{\text{vulnerability}} &= -0.5 + 0.3 \cdot i_{\text{loneliness}} + 0.2 \cdot i_{\text{longing}} \\
 &\quad + 0.15 \cdot s_{\text{abandonment}}
 \end{aligned}
 $$
 
-**特质修饰（sigmoid 软阈值）：**
+注意：以上公式中**不包含 traits**（原 pride 对 restraint/vulnerability 的直连已移除）。
+
+#### 惯性系数 α
 
 $$
-\sigma_{\text{pride}} = \sigma\Bigl(\frac{\tau_{\text{pride}}}{0.30}\Bigr),\quad
-\sigma_{\text{open}} = \sigma\Bigl(\frac{\tau_{\text{openness}}}{0.30}\Bigr),\quad
-\sigma_{\text{optim}} = \sigma\Bigl(\frac{\tau_{\text{optimism}}}{0.30}\Bigr)
+\alpha = \text{clip}(0.5 - 0.3 \cdot \max(0, i_{\text{stress}}) + 0.2 \cdot \max(0, i_{\text{energy}}),\; 0.1,\; 0.9)
 $$
 
-$$
-\begin{aligned}
-s_{\text{sharpness}} &\mathrel{+}= \sigma_{\text{pride}} \cdot \tau_{\text{pride}} \cdot 0.10 \\
-s_{\text{vulnerability}} &\mathrel{-}= \sigma_{\text{pride}} \cdot \tau_{\text{pride}} \cdot 0.15 \\
-s_{\text{expressiveness}} &\mathrel{+}= \sigma_{\text{open}} \cdot \tau_{\text{openness}} \cdot 0.10 \\
-s_{\text{restraint}} &\mathrel{-}= \sigma_{\text{open}} \cdot \tau_{\text{openness}} \cdot 0.10 \\
-s_{\text{enthusiasm}} &\mathrel{+}= \sigma_{\text{optim}} \cdot \tau_{\text{optimism}} \cdot 0.10
-\end{aligned}
-$$
+- 高压力 → α 下降（表面更"僵"，惯性更强）
+- 高精力 → α 上升（表面更"灵"，响应更快）
+- 首帧 `prev_surface=None` → 跳过混合，纯 raw 输出
+
+#### 表面→内部反馈（新的 Layer 4）
+
+反馈矩阵 $\text{SURFACE\_FEEDBACK} \in \mathbb{R}^{7 \times 8}$，仅 $surface > 0$ 的维度产生反馈：
 
 $$
-S = \text{soft\_clamp}(s, -1, 1)
+\Delta_{\text{internal}} = \max(0, S) \cdot M_{\text{feedback}}
 $$
+
+三条反馈机制（trace 量级 0.03–0.06）：
+
+| 机制 | 示例 | 系数 |
+|------|------|:----:|
+| ① 情绪失调成本 | 克制真实感受 → 压力上升 | +0.06 |
+| ② 面部/躯体反馈 | 温暖表达 → 孤独感降低 | -0.04 |
+| ③ 表达消耗成本 | 表达外露 → 精力消耗 | -0.06 |
 
 ---
 
@@ -468,9 +488,9 @@ $$
 
 ### 7.1 架构
 
-三层架构：**无需旧版 memory_inject_node / memory_summery_node 为 stub 的说法，两者已完整实现并接入流水线。**
+三层架构：`memory_inject_node` / `memory_summery_node` 在 `nodes.py` 中已完整实现（含 LLM 调用 + JSON 解析 + MemoryStore 持久化），但**尚未注册到 `graph/_builder.py`**，当前流水线未激活记忆系统。
 
-#### 热路径（每轮自动）
+#### 热路径（每轮自动，待接入图）
 
 | 节点 | 触发时机 | 行为 |
 |------|---------|------|
@@ -518,7 +538,7 @@ MemoryNode:
 | 记忆总结 | `qwen2.5:7b` | Ollama | 独立实例 |
 | 嵌入 | `qwen3-embedding:8b` | Ollama | 768 维 |
 
-> **更新：** CLAUDE.md 记载"perception_model aliased to DeepSeek"已过时，实际代码已改为独立 Ollama 模型。
+> **更新：** 感知模型已改为独立 Ollama qwen2.5:7b 模型（非 DeepSeek，非 aliased），与主对话模型分离。
 
 ---
 
@@ -528,24 +548,27 @@ MemoryNode:
 
 | # | 约束 | 状态 | 说明 |
 |:-:|------|:----:|------|
-| ① | Trait 不直接影响状态 | ❌ | surface 直接读 $\tau_{\text{pride}}$ |
+| ① | Trait 不直接影响状态 | ✅ | **已修复**——traits 从 surface 移除，通过 defense/dynamics 间接 |
 | ② | 刺激元属性 | ❌ | StimulusMetadata 不存在 |
 | ③ | 矩阵低秩 | ✅ | 均 $\ge 55\%$ |
-| ④ | 禁止跨层连线 | ❌ | surface 读 internal / traits / outer |
-| ⑤ | 语义映射层 | ❌ | WeightMapper 不存在 |
-| ⑥ | 正交稀疏 | ⚠️ | 小矩阵需调整下限 |
+| ④ | 禁止跨层连线（已修正） | ⚠️ | outer_stimuli→surface 是 by design（已由 defenses 压抑）；traits→surface ✅ **已移除** |
+| **⑤** | **语义映射层** | **✅** | **WeightMapper/WeightVector/LinearMapping 覆盖全引擎 250+ 参数** |
+| **⑥** | **正交稀疏** | **✅** | **B_int 28.6%, B_rel 28.6%** |
 | ⑦ | 谱半径 $\rho < 0.95$ | ✅ | $\rho(C_{\text{int}})=0.099$, $\rho(C_{\text{rel}})=0.058$ |
-| ⑧ | 参数审计 | ❌ | ConstraintRegistry 不存在 |
-| ⑨ | 全局雅可比 | ✅ | $23.9\% \le 30\%$ |
+| **⑧** | **参数审计** | **✅** | **ConstraintRegistry: 14+ 组配置全部注册，新增 SURFACE_FEEDBACK_MATRIX** |
+| ⑨ | 全局雅可比 | ✅ | $19.9\% \le 30\%$ |
+| ⑩ | 刺激正交性保证 | ⚠️ | 当前 $r=0.015$ ✅，但无代码守卫 |
+| ⑪ | 状态格式化连续性 | ❌ | 5 级离散 `_desc()` 硬阈值 |
 
 ### 9.2 矩阵审计
 
-| 矩阵 | 形状 | ③ 有效秩比 | ⑥ 密度 | ⑦ 谱半径 |
-|------|:----:|:----------:|:------:|:--------:|
-| $B_{\text{int}}$ | $7 \times 8$ | $70\%$ | ❌ $44.6\%$ | — |
-| $B_{\text{rel}}$（去相关） | $7 \times 3$ | $99\%$ | ⚠️ $38.1\%$ | — |
-| $C_{\text{int}}$（显式） | $8 \times 8$ | $55\%$ | ✅ $17.2\%$ | ✅ $0.099$ |
-| $C_{\text{rel}}$（显式） | $3 \times 3$ | $85\%$ | ⚠️ $66.7\%$ | ✅ $0.058$ |
+| 矩阵 | 形状 | ③ 有效秩比 | ⑥ 密度 | ⑦ 谱半径 | ⑤ WeightMapper |
+|------|:----:|:----------:|:------:|:--------:|:----:|
+| $B_{\text{int}}$（去相关） | $7 \times 8$ | $77\%$ | ✅ $28.6\%$ | — | ✅ 16 entries |
+| $B_{\text{rel}}$（去相关） | $7 \times 3$ | $99\%$ | ✅ $28.6\%$ | — | ✅ 6 entries |
+| $C_{\text{int}}$（显式） | $8 \times 8$ | $55\%$ | ✅ $17.2\%$ | ✅ $0.099$ | — |
+| $C_{\text{rel}}$（显式） | $3 \times 3$ | $85\%$ | ✅ $66.7\%$（小矩阵例外） | ✅ $0.058$ | — |
+| $\text{SURFACE\_FEEDBACK}$（新增） | $7 \times 8$ | — | ✅ trace 密度 | — | ✅ 9 entries |
 
 ---
 
@@ -563,9 +586,11 @@ MemoryNode:
 | `state_engine/_pipeline.py` | update_all / initialize_all 编排 |
 | `state_engine/_defenses.py` | Bowlby 防御剖面（逐维权重，刺激特异性） |
 | `state_engine/_dynamics.py` | 残差动力学 + setpoint 计算 |
-| `state_engine/_surface.py` | 表面投影 |
+| `state_engine/_surface.py` | 表面投影（惯性混合 + 表面→内部反馈） |
+| `state_engine/_surface_weights.py` | SURFACE_MAPPER (18→7 LinearMapping) + SURFACE_FEEDBACK_MATRIX (7×8 WeightMapper) |
 | `state_engine/_decay.py` | 时间衰减 + DecayConfig |
-| `state_engine/_matrices.py` | $B_{\text{int}}$（$7 \times 8$） |
+| `state_engine/_matrices.py` | $B_{\text{int}}$（$7 \times 8$）+ $B_{\text{rel}}$（$7 \times 3$），均通过 WeightMapper 构建 |
+| `state_engine/_validator.py` | WeightMapper + WeightVector + ConstraintRegistry 约束框架实现 |
 | `state_engine/_utils.py` | soft_clamp + sigmoid |
 | `state_formatter.py` | 数值状态 → 中文导演描述 |
 | `memory.py` | MemoryNode + MemoryStore + 3 种检索方法 |
@@ -577,7 +602,7 @@ MemoryNode:
 | `prompts/character_memories.py` | 24 条种子记忆锚点 |
 | `main.py` | FastAPI stub（仅 health check） |
 | `tools/audit_constraints.py` | 约束合规审计脚本 |
-| `tests/` | 8 个测试文件，194 测试通过 |
+| `tests/` | 9 个测试文件，230 测试通过（06-22：+18 surface 测试） |
 
 ---
 
@@ -586,12 +611,9 @@ MemoryNode:
 | 等级 | 问题 | 原因 |
 |:----:|------|------|
 | 🔴 P0 | Traits 永不更新 | 无 trait 演化机制 |
-| 🔴 P0 | SurfaceState 不注入 LLM | 仅 internal/relationship 进入 formatter |
-| 🔴 P0 | 离散 StateFormatter | 5 级阈值重离散连续状态 |
+| 🔴 P0 | StateFormatter 离散化 | 5 级硬阈值损失连续性（约束⑪违反） |
 | 🟡 P1 | 无 UserModel | 用户心理剖面缺失 |
 | 🟡 P1 | 无目标/意图系统 | 角色纯被动 |
-| 🟡 P1 | 记忆无上限增长 | 无遗忘/合并 |
-| 🟡 P1 | 全局雅可比约束未代码化 | 仅有审计脚本 |
-| 🟢 P2 | 权重硬编码 | 未外部化 JSON/YAML |
+| 🟢 P2 | `_defenses.py` 计算路径使用裸数组而非 WeightVector.values | 12 组 WeightVector 已注册，但 compute_defense_profiles() 仍引用模块级裸数组 |
 | 🟢 P2 | 上下文窗口仅 4 条 | context_window=4 |
-| 🟢 P2 | decay.py setpoint 重复 | 与 dynamics.py 重复实现 |
+| 🟢 P2 | 记忆无遗忘机制 | 记忆无上限增长 |

@@ -1,8 +1,6 @@
 # Lunar 状态引擎路线图、执行计划与测试报告
 
-> 2026-06-21 | 整合 ROADMAP.md（问题清单）+ EXECUTION_PLAN.md（排期计划）+ STATE_ENGINE_TEST_REPORT.md（测试快照）
->
-> 已完成的架构修复（LSTM 三门控 → 残差动力学、decay>1 → 时间衰减、A 矩阵 → 命名规则、β 调制修复、SELF_DECAY 每维独立数组、跨尺度耦合）不再列于问题清单中，但保留在已完成记录中。
+> 2026-06-22 | Surface 重构完成（惯性更新、双向耦合、traits 间接化）
 
 ---
 
@@ -26,7 +24,7 @@
 
 #### 🔴 问题 3：记忆系统尚未完全集成
 
-- MemoryStore + 三路检索 + MemoryNode 已实现，但 `memory_inject_node` 和 `memory_summery_node` 在 `nodes.py` 中为 stub
+- MemoryStore + 三路检索 + MemoryNode 已实现，`memory_inject_node` 和 `memory_summery_node` 在 `nodes.py` 中有完整逻辑（LLM 调用 + JSON 解析 + 持久化），但**未注册到 `graph/_builder.py`**，流水线不在活跃状态
 - **状态**：部分实现，待集成
 
 #### 🔴 问题 4：无"目标/意图"系统，角色"无欲无求"
@@ -41,8 +39,8 @@
 - **最大冗余**：familiarity×romantic_tension r=+0.997，irritation×mental_fatigue r=+0.997
 - **根因**：耦合矩阵过密导致维度全协同无拮抗；关系维度 6 维全部正相关同步运动
 - **影响**：心理表达力 ≈ 6 维而非 14 维
-- **方向**：语义合并关系维度 6→3，或双速 SSM/PAD 正交基底
-- **状态**：待方案（已制定 P0 执行计划）
+- **方向**：语义合并关系维度 6→3（已完成），B 矩阵去相关化（已完成，B_int 28.6% + B_rel 28.6%），双速 SSM/PAD 正交基底（待远期）
+- **状态**：B 矩阵已修复，全局雅可比密度从 23.9% 降至 19.9%
 
 ### 🟡 中等问题（影响真实感）
 
@@ -77,101 +75,48 @@
 
 ## 二、执行计划
 
-### 总体排期
+### 当前状态与剩余工作
 
-```
-周 1        周 2        周 3        周 4
-├P0-A──────┤
-├P0-B──┤
-            ├P1-C──────┤
-            ├P1-D──────────┤
-            ├P1-G──────┤
-            ├P1-H──┤
-                        ├P2-E──────────┤
-                        ├P2-F──────────┤
-                                       ├P3-远期───
-```
+> 截至 2026-06-22，核心数学基础设施已完成：
+> - ✅ 关系维度 6→3 语义合并（方案 A）
+> - ✅ 防御剖面多维输入源（方案 B，实际合并了原多维调制而非独立新变量）
+> - ✅ β 调制系数释放（方案 C）— β 有效范围 [0.01, 0.35]
+> - ✅ 约束框架完整实现（方案 G）— WeightMapper + WeightVector + LinearMapping + ConstraintRegistry
+> - ✅ 250+ 参数全量迁移（无 origin=legacy 参数）
 
-| 编码 | 方案 | 等级 | 工期 | 依赖 | 排期 |
+| 编码 | 方案 | 等级 | 工期 | 依赖 | 状态 |
 |:---:|------|:---:|:----:|:----:|:----:|
-| **A** | 语义合并关系维度 6→3 | **P0** | 1d | 无 | 本周 |
-| **B** | 增加防御剖面输入源 | **P0** | 1d | 无 | 本周 |
-| **C** | β 调制系数释放 | P1 | 0.5d | A（推荐） | 下周 |
-| **D** | OCC 拮抗对扩展刺激空间 | P1 | 3d | 无 | 下周 |
-| **G** | 约束框架最低实现 | P1 | 3d | 无 | 下周 |
-| **H** | 记忆系统集成 | P1 | 2d | 无 | 下周 |
-| **E** | Trait 演化 v1 | **P2** | 5d | D | 周 3 |
-| **F** | 双速 SSM v1 | **P2** | 2w | A, E | 周 3-4 |
+| **H** | 记忆系统集成 | **P1** | 1d | 无 | ⏳ 代码已写，需接入 graph |
+| **D** | OCC 拮抗对/刺激扩展 | P1 | 3d | 无 | ❌ 待方案 |
+| **E** | Trait 演化 v1 | **P2** | 5d | D（推荐） | ❌ 待方案 |
+| **F** | 双速 SSM v1 | **P2** | 2w | E | ❌ 待方案 |
 
-### P0（本周）：低风险高回报
+### P1（短期优先）
 
-#### 方案 A：语义合并关系维度 6→3
-
-**目标：** 将关系态从 6 维合并为 3 维，将有效自由度从 ~5 提升至 ~7-8。
-
-**映射规则：**
-
-| 当前 6 维 | 合并后 3 维 | 心理学框架 |
-|-----------|-----------|-----------|
-| `R_AFFECTION` + `R_INTIMACY` + `R_TRUST_BOND` | **R_BOND**（情感纽带） | Sternberg 亲密三成分 |
-| `R_EMOTIONAL_SAFETY` + `R_FAMILIARITY` | **R_SAFETY**（安全感） | Bowlby 安全基地 |
-| `R_DEPENDENCY` + `R_ROMANTIC_TENSION` | **R_INVOLVEMENT**（卷入度） | Berscheid 暧昧张力 |
-
-**待修改文件顺序：** `state.py` → `_matrices.py` → `_dynamics.py` → `_surface.py` → `_defenses.py` → `_decay.py` → `tests/`
-
-**核心耦合矩阵草案（3×3）：**
-
-```
-         R_BOND   R_SAFETY   R_INVOLVEMENT
-R_BOND    [0.0      0.08       0.05]
-R_SAFETY   [0.06     0.0        0.0]
-R_INVOLVEMENT [0.0   -0.03      0.0]
-```
-
-3×3 矩阵允许自然出现拮抗对（involvement 负向影响 safety），当前 6 维做不到。
-
-#### 方案 B：增加防御剖面输入源
-
-**目标：** 将去激活的输入源从 3→5，过度激活从 4→6，使独立方差从 ~0% → 5-10%。
-
-**待修改：** 仅 `_defenses.py` 一个文件。
-
-新增权重数组：
-- 去激活新增：`INTIMACY_DEACT_A`、`LONELINESS_DEACT_A`、`ENERGY_DEACT_A`
-- 过度激活新增：`STRESS_HYPER_A`、`FATIGUE_HYPER_A`
-
-验证方法：
-```bash
-uv run python tools/audit_defenses.py
-# 预期: 去激活独立方差: ~0% → ~5-8%
-#       过度激活独立方差: ~0% → ~3-6%
-```
-
-### P1（下周）：中风险中回报
-
-| 方案 | 目标 | 改动文件 | 工期 |
+| 方案 | 目标 | 预计改动 | 工期 |
 |------|------|---------|:----:|
-| **C：β 释放** | β 有效范围 [0.02,0.08] → [0.01,0.20] | `_dynamics.py` | 0.5d |
-| **D：OCC 拮抗对** | 不修改 ST_SIZE，在 perception.py 添加评价后处理 | `perception.py`, `config.py` | 3d |
-| **G：约束框架** | 实现 WeightMapper + 4 条关键约束自动检查 | 新建 `_validator.py` | 3d |
-| **H：记忆集成** | 完成 nodes.py 两个 stub | `nodes.py`, `_builder.py`, `state.py` | 2d |
+| **H：记忆集成** | `memory_inject_node` + `memory_summery_node` 接入 `graph/_builder.py` | 只需改 `graph/_builder.py`，节点函数已就绪 | **1d** |
+| **D：OCC/刺激扩展** | 不修改 ST_SIZE，在 perception.py 添加评价后处理或扩展维数 | `perception.py`, `config.py` | 3d |
+| **约束⑪修复** | State Formatter 连续化 — 替代当前 5 级离散 `_desc()` | `state_formatter.py` | 2d |
+| **约束②实现** | StimulusMetadata — 置信度/来源编码/衰减调节因子 | `perception.py`, `state.py`, `state_engine/_decay.py` | 2d |
+| **防御剖面权重重构** | 计算路径从裸数组切换到 WeightVector.values | `_defenses.py` 内部 12 组数组引用 | 1d |
 
-### P2（周 3-4）：高风险高回报
+### P2（中期）
 
 #### 方案 E：Trait 演化 v1
 
 使 10 维 trait 在不超出对数漂移边界的前提下，随交互结果缓慢更新。基于 SALM 对数收敛定理（0.08log(k)+0.12），每 5 轮触发一次更新，置信度从 0.3 开始渐进增长。
 
 ```python
-# 核心增量规则
+# 核心增量规则（示例草案）
 delta[T_EMOTIONAL_STABILITY] -= internal[I_STRESS] * 0.005  # 长期压力→稳定性↓
-delta[T_ATTACHMENT_AVOIDANCE] += (0.5 - relationship[R_BOND]) * 0.01  # 低信任→回避↑
+delta[T_ATTACHMENT_AVOIDANCE] += (0.5 - relationship[R_TRUST_BOND]) * 0.01  # 低信任→回避↑
 delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 ```
 
 #### 方案 F：双速 SSM v1
 
-将扁平动力学分解为快速层（PAD, 3 维, dt=1）和慢速层（关系态, 6/3 维, 累积更新）。详细设计见 `AFFECTIVE_GEOMETRY_RESEARCH.md`。
+将扁平动力学分解为快速层（PAD, 3 维, dt=1）和慢速层（关系态, 3 维, 累积更新）。详细设计见 `AFFECTIVE_GEOMETRY_RESEARCH.md`。
 
 ### P3（远期方向）
 
@@ -223,16 +168,16 @@ delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 
 ## 三、测试报告（当前快照）
 
-> 2026-06-20 | 192 用例全部通过 | 155s | 四项结构性修复
+> 2026-06-22 | 230 测试用例全部通过（Surface 惯性+反馈+traits 间接化重构）
 
 ### 测试概览
 
 | 指标 | 数值 |
 |------|------|
 | 测试文件 | 9 个模块 |
-| 测试用例 | **192**（含 34 个对抗式双Agent耦合检验 + 27 个时间衰减监督测试） |
-| 通过率 | 100% (192/192) |
-| 执行时间 | 155s |
+| 测试用例 | **230**（含 Surface 惯性/反馈测试 22 项 + 34 个对抗式双Agent耦合检验 + 27 个时间衰减监督测试） |
+| 通过率 | 100% (230/230) |
+| 执行时间 | 151s |
 | 最大单测数据量 | **500,000 组** Monte Carlo |
 | 对抗检验轮数 | 100 组 × 500 轮 + 5 场景 × 1000-1500 轮独立报告 |
 | 总模拟步数 | 约 **200 万** 次管线调用 |
@@ -308,7 +253,7 @@ delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 ### 运行测试
 
 ```bash
-# 全部测试（192 用例）
+# 全部测试（230 用例）
 uv run pytest tests/ -v
 
 # 异常探测（含维度分析）
@@ -326,7 +271,7 @@ uv run pytest tests/test_decay.py -v -k "not TestVisualization"
 |------|--------|---------|
 | 1 | 特质演化 | Bowlby 依恋理论, McAdams 人生叙事, Whole Trait Theory |
 | 2 | 情绪分类 + Appraisal | Plutchik, Ekman, Scherer CPM, OCC 模型 |
-| 3 | 记忆集成 | 当前代码 `nodes.py` stub, 设计见 `MEMORY_SYSTEM.md` |
+| 3 | 记忆集成 | 当前 `nodes.py` 节点代码完整但未注册到 `graph/_builder.py`，设计见 `MEMORY_SYSTEM.md` |
 | 4 | 行为驱动 | BDI 模型, SDT, Goal-Directed Behavior |
 | 5 | 维度冗余 | `SPARSE_ANTAGONIST_ANALYSIS.md`, `AFFECTIVE_GEOMETRY_RESEARCH.md` |
 | 6 | 情绪表达 | FACS, Russell Circumplex Model |
@@ -367,4 +312,18 @@ uv run pytest tests/test_decay.py -v -k "not TestVisualization"
 | REL_SELF_DECAY 每维度独立数组 | 06-20 |
 | 跨尺度耦合（内→关） | 06-20 |
 | PCA 维度冗余实证 | 06-20 |
-| 192 测试用例全通过 | 06-19 |
+| Surface 惯性混合 + 反馈 + traits 间接化 | 06-22 |
+| 230 测试用例全通过 | 06-22 |
+| 关系维度 6→3 语义合并 | 06-21 |
+| B_int 去相关化 + 稀疏化（44.6% → 28.6%，约束⑥合规） | 06-21 |
+| B_rel 去相关化 + 稀疏化（38.1% → 28.6%，全正交签名） | 06-21 |
+| WeightMapper 骨架（约束⑤ — 语义映射层） | 06-21 |
+| WeightVector 骨架（12 组防御权重 provenance） | 06-21 |
+| ConstraintRegistry 骨架（约束⑧ — 参数审计） | 06-21 |
+| JSON 权重外部化导入/导出 | 06-21 |
+| 全局雅可比密度从 23.9% → 19.9% | 06-21 |
+| **LinearMapping 类 + BiasWeight（表面/速率/setpoint 迁移基础）** | **06-21** |
+| **表面投影 35 条线性系数 + 7 偏置 → SURFACE_MAPPER** | **06-21** |
+| **动力学 α/β/setpoint/耦合/自阻尼 全部迁移** | **06-21** |
+| **防御剖面 deact/hyper 基线 + sigmoid + apply 增益迁移** | **06-21** |
+| **衰减 λ/时间曲线/人格调制 全部迁移** | **06-21** |
