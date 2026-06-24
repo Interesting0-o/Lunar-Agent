@@ -106,6 +106,13 @@ def _build_surface_mapper() -> LinearMapping:
     lm.connect("internal", "longing", S_VULNERABILITY, 0.2,
                "weak", (0.10, 0.30), "思念→流露脆弱", "theory", "2026-06-21")
 
+    # 压力→脆弱↑（补充入边，vulnerability 原有 3 条入边总和 0.65 低于其他维度 0.8-1.5）
+    lm.connect("internal", "stress", S_VULNERABILITY, 0.10,
+               "trace", (0.04, 0.18), "压力→防御下降，脆弱外露", "theory", "2026-06-23")
+    # 低精力→脆弱↑（精力过低时无力维持防御伪装）
+    lm.connect("internal", "energy", S_VULNERABILITY, -0.05,
+               "trace", (-0.10, -0.02), "精力不足→无力伪装，脆弱暴露", "theory", "2026-06-23")
+
     # ════════════════════════════════════════════════════════════════
     # 关系态 → 表面（对用户的感受投射）
     # ════════════════════════════════════════════════════════════════
@@ -211,7 +218,7 @@ def _build_surface_feedback_matrix() -> np.ndarray:
     # ── ③ 表达消耗成本：活跃表达消耗精力 ──
     mapper.connect(S_EXPRESSIVENESS, I_ENERGY, -0.06, "trace", (-0.10, -0.02),
                    "表达外露→精力消耗", "calibrated", "2026-06-22")
-    mapper.connect(S_EXPRESSIVENESS, I_MENTAL_FATIGUE, 0.05, "trace", (0.02, 0.09),
+    mapper.connect(S_EXPRESSIVENESS, I_MENTAL_FATIGUE, 0.02, "trace", (0.02, 0.09),
                    "表达外露→疲劳微增", "calibrated", "2026-06-22")
     mapper.connect(S_RESTRAINT, I_MENTAL_FATIGUE, 0.04, "trace", (0.01, 0.08),
                    "克制压抑→精神疲劳", "calibrated", "2026-06-22")
@@ -226,6 +233,78 @@ def _build_surface_feedback_matrix() -> np.ndarray:
     return M
 
 
+def _build_surface_feedback_negative() -> np.ndarray:
+    """表面→内部负反馈映射 (7×8)：压抑/伪装/隐忍的心理代谢成本。
+
+    当表面值为负时（压抑真实情绪/强装），产生代谢成本：
+      - 压抑表达（S_EXPRESSIVENESS < 0）：忍住不说 vs 说出来——两者都消耗能量
+      - 强装冷淡（S_WARMTH < 0）：推开他人→孤独感上升
+      - 压抑锋芒（S_SHARPNESS < 0): 该怒不怒→压力积蓄
+      - 生硬冷淡（S_SOFTNESS < 0)：缺乏柔和→关系张力
+      - 低活力（S_ENTHUSIASM < 0）：可能是在节省能量，也可能是在消沉
+      - 不克制（S_RESTRAINT < 0）：想啥说啥→压力释放但有社交风险
+      - 不脆弱（S_VULNERABILITY < 0）：故作坚强→精力消耗
+    """
+    from state import I_SIZE, S_SIZE, S_LABELS, I_LABELS
+
+    mapper = WeightMapper(
+        "SURFACE_FEEDBACK_NEG",
+        source_labels=S_LABELS,
+        target_labels=I_LABELS,
+        description="表面→内部负反馈（压抑成本/社交代谢）",
+    )
+
+    # ── 压抑表达的成本 ──
+    mapper.connect(S_EXPRESSIVENESS, I_ENERGY, 0.02, "trace", (0.01, 0.08),
+                   "忍住不表达→精力消耗", "calibrated", "2026-06-22")
+    mapper.connect(S_EXPRESSIVENESS, I_MENTAL_FATIGUE, 0.05, "trace", (0.02, 0.09),
+                   "强行收敛情绪→精神疲劳", "calibrated", "2026-06-22")
+
+    # ── 强装冷淡/温暖不足 → 孤独感上升 ──
+    mapper.connect(S_WARMTH, I_LONELINESS, -0.02, "trace", (-0.10, -0.02),
+                   "表面冷淡→内心孤独加剧", "calibrated", "2026-06-22")
+    mapper.connect(S_WARMTH, I_STRESS, 0.01, "trace", (0.01, 0.06),
+                   "强装冷漠→压力微升", "calibrated", "2026-06-22")
+
+    # ── 压抑锋芒 → 压力积蓄 ──
+    mapper.connect(S_SHARPNESS, I_STRESS, -0.02, "trace", (-0.08, -0.01),
+                   "该怒不怒→压力沉闷积累", "calibrated", "2026-06-22")
+    mapper.connect(S_SHARPNESS, I_IRRITATION, -0.01, "trace", (-0.06, -0.01),
+                   "强压怒火→烦躁内化", "calibrated", "2026-06-22")
+
+    # ── 低柔软度（生硬）→ 关系损耗 ──
+    mapper.connect(S_SOFTNESS, I_LONELINESS, -0.01, "trace", (-0.06, -0.01),
+                   "态度生硬→推远他人", "calibrated", "2026-06-22")
+
+    # ── 活力低落 → 能量保存但有消沉风险 ──
+    mapper.connect(S_ENTHUSIASM, I_ENERGY, 0.01, "trace", (0.01, 0.06),
+                   "低活力状态→能量正在恢复", "calibrated", "2026-06-22")
+    mapper.connect(S_ENTHUSIASM, I_LONELINESS, -0.01, "trace", (-0.06, -0.01),
+                   "消沉不互动→孤独感加深", "calibrated", "2026-06-22")
+
+    # ── 不克制（直白坦率）→ 压力释放但有社交风险 ──
+    mapper.connect(S_RESTRAINT, I_STRESS, 0.01, "trace", (0.01, 0.06),
+                   "不克制→压力释放", "calibrated", "2026-06-22")
+    mapper.connect(S_RESTRAINT, I_INSECURITY, -0.01, "trace", (-0.06, -0.01),
+                   "想啥说啥→事后不安", "calibrated", "2026-06-22")
+
+    # ── 故作坚强（低脆弱）→ 精力消耗 ──
+    mapper.connect(S_VULNERABILITY, I_ENERGY, 0.02, "trace", (0.01, 0.08),
+                   "故作坚强→维持形象消耗", "calibrated", "2026-06-22")
+    mapper.connect(S_VULNERABILITY, I_LONGING, 0.01, "trace", (0.01, 0.06),
+                   "不流露脆弱→渴望被看穿", "calibrated", "2026-06-22")
+
+    M = mapper.build_matrix(
+        (S_SIZE, I_SIZE),
+        skip_sparsity=True,
+        skip_orthogonality=True,
+        skip_rank=True,
+    )
+    register_mapper(mapper)
+    return M
+
+
 # ── 模块加载时构建 ──
 SURFACE_MAPPER = _build_surface_mapper()
 SURFACE_FEEDBACK_MATRIX = _build_surface_feedback_matrix()
+SURFACE_FEEDBACK_NEG = _build_surface_feedback_negative()

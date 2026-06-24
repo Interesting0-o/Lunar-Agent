@@ -28,6 +28,7 @@ from ._utils import soft_clamp
 from ._surface_weights import (
     SURFACE_MAPPER,
     SURFACE_FEEDBACK_MATRIX,
+    SURFACE_FEEDBACK_NEG,
 )
 
 
@@ -50,16 +51,22 @@ def project_surface(
     relationship: np.ndarray,
     outer_stimuli: np.ndarray,
     prev_surface: np.ndarray | None = None,
+    delta_hours: float = 0.0,
 ) -> np.ndarray:
-    """④ 表面投影：内部态+关系态+外刺激 → 表面表达（带惯性混合）。
+    """④ 表面投影：内部态+关系态+外刺激 → 表面表达（带惯性混合 + 时间衰减）。
 
-    s(t) = alpha * raw(t) + (1 - alpha) * s(t-1)
+    s(t) = alpha * raw(t) + (1 - alpha) * s'(t-1)
+
+    其中 s'(t-1) 是 prev_surface 经时间衰减后的版本：
+      s'(t-1) = raw + (prev - raw) · exp(-0.5 · Δt)
+    衰减半衰期约 1.4 小时——长时间间隔后表面表达"清零"重新初始化。
 
     Args:
         internal: 内部状态 (8,)
         relationship: 关系状态 (3,)
         outer_stimuli: 压抑后的外表情刺激 (7,)
         prev_surface: 前一帧表面状态 (7,)，None 表示首帧/初始化
+        delta_hours: 自上次表面投影以来的时间（小时），0 表示连续对话
 
     Returns:
         surface_state (7,)
@@ -68,10 +75,17 @@ def project_surface(
     sources = np.concatenate([internal, relationship, outer_stimuli])
     raw = SURFACE_MAPPER.compute(sources).copy()  # (7,)
 
-    # ── 惯性混合 ──
+    # ── 惯性混合（含时间衰减） ──
     if prev_surface is not None:
+        # 时间衰减：prev_surface 向 raw 回归（表面"遗忘"效应）
+        if delta_hours > 0.01:
+            surface_decay = np.exp(-0.5 * delta_hours)
+            prev_adj = raw + (prev_surface - raw) * surface_decay
+        else:
+            prev_adj = prev_surface
+
         alpha = _compute_surface_alpha(internal)
-        s = alpha * raw + (1.0 - alpha) * prev_surface
+        s = alpha * raw + (1.0 - alpha) * prev_adj
     else:
         s = raw
 
@@ -82,16 +96,16 @@ def compute_surface_feedback(
     surface: np.ndarray,
     internal: np.ndarray,
 ) -> np.ndarray:
-    """⑤ 表面→内部反馈：情绪失调成本 + 面部/躯体反馈 + 表达消耗。
+    """⑤ 表面→内部反馈：情绪失调成本 + 面部/躯体反馈 + 表达消耗 + 压抑成本。
 
     与 update_relationship_state 中的跨尺度耦合模式一致
     （CROSS_SCALE_COUPLING: internal(8,) @ M(8,3) → (3,)）。
 
     此处: surface(7,) @ M(7,8) → feedback_delta(8,)
 
-    注意：仅 surface 的正值（主动表达）产生反馈。
-    负值（如 S_RESTRAINT < 0 → "不克制"）不应反向降低 stress，
-    因为情绪劳动/面部反馈效应要求"正在做某事"才有代谢成本。
+    使用两个矩阵：
+      - SURFACE_FEEDBACK_MATRIX: 正值（主动表达）→ 失调成本/面部反馈/表达消耗
+      - SURFACE_FEEDBACK_NEG: 负值（压抑/伪装）→ 压抑成本/社交代谢
 
     Args:
         surface: 当前表面状态 (7,)
@@ -100,5 +114,6 @@ def compute_surface_feedback(
     Returns:
         feedback_delta (8,)，下轮加到内部状态
     """
-    active = np.maximum(surface, 0.0)  # 仅正值产生反馈
-    return active @ SURFACE_FEEDBACK_MATRIX  # (7,) @ (7,8) → (8,)
+    pos = np.maximum(surface, 0.0)   # 正值：主动表达
+    neg = np.minimum(surface, 0.0)   # 负值：压抑/伪装
+    return pos @ SURFACE_FEEDBACK_MATRIX + neg @ SURFACE_FEEDBACK_NEG

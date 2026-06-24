@@ -155,6 +155,13 @@ def apply_time_decay_internal(
     decay_factor = np.exp(-lam * delta_hours)
     decayed = setpoint + deviation * decay_factor
 
+    # 长时间间隔收敛保障（P0公式安全）
+    # 1/(1+k·Dt) 的衰减在 Dt→∞ 时有渐近残余 λ/k（约 13.5%）。
+    # 对 >1 周的间隔，用二次衰减将残余推至 setpoint。
+    if delta_hours > 168:
+        extra_decay = 1.0 - np.exp(-0.01 * (delta_hours - 168))
+        decayed = decayed + extra_decay * (setpoint - decayed)
+
     return soft_clamp(decayed, -1.0, 1.0)
 
 
@@ -195,12 +202,18 @@ def apply_time_decay_relationship(
 
     deviation = current - setpoint
 
-    # 非对称衰减：负向偏离（current < setpoint，即负面印象）加速恢复
-    negative_mask = deviation < 0
+    # 非对称衰减：真正负面情绪（current<0 且低于 setpoint）加速恢复
+    # 仅偏离<0 会误判 energy/social_battery 等正向维度低于高基线的场景
+    negative_mask = (current < 0) & (deviation < 0)
     lam[negative_mask] *= config.negative_decay_boost
 
     decay_factor = np.exp(-lam * delta_hours)
     decayed = setpoint + deviation * decay_factor
+
+    # 长时间间隔收敛保障（P0公式安全）
+    if delta_hours > 168:
+        extra_decay = 1.0 - np.exp(-0.01 * (delta_hours - 168))
+        decayed = decayed + extra_decay * (setpoint - decayed)
 
     return soft_clamp(decayed, -1.0, 1.0)
 

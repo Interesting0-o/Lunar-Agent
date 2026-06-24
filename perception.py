@@ -47,7 +47,12 @@ def validate_perception_result(data: dict) -> bool:
     return True
 
 
-def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
+def call_perception_with_retry(
+    user_context: list,
+    cfg: dict,
+    internal_state: Optional[np.ndarray] = None,
+    relationship_state: Optional[np.ndarray] = None,
+) -> Optional[dict]:
     """调用感知模型并自动重试。
 
     成功返回（numpy 数组格式）：
@@ -56,8 +61,33 @@ def call_perception_with_retry(user_context: list, cfg: dict) -> Optional[dict]:
       }
 
     全部失败返回 None，由调用方设置 error=True。
+
+    Args:
+        user_context: 对话上下文消息列表
+        cfg: 感知配置字典（max_retries, context_window, retry_emphases）
+        internal_state: 当前内部状态 (8,)，用于注入状态上下文
+        relationship_state: 当前关系状态 (3,)，用于注入状态上下文
     """
     system_prompt = PERCEPTION_SYSTEM_PROMPT
+
+    # 注入状态上下文辅助感知判断
+    if internal_state is not None or relationship_state is not None:
+        state_note = "\n\n## 当前角色状态（影响刺激解读）\n"
+        if internal_state is not None:
+            # 将 8 维内部状态转为简洁文本
+            i_labels = ["energy", "stress", "loneliness", "insecurity",
+                        "irritation", "longing", "social_battery", "mental_fatigue"]
+            i_summary = " | ".join(f"{lbl}={internal_state[i]:+.2f}"
+                                   for i, lbl in enumerate(i_labels))
+            state_note += f"内部状态: {i_summary}\n"
+        if relationship_state is not None:
+            r_labels = ["affection", "trust_bond", "intimacy"]
+            r_summary = " | ".join(f"{lbl}={relationship_state[i]:+.2f}"
+                                   for i, lbl in enumerate(r_labels))
+            state_note += f"关系状态: {r_summary}\n"
+        state_note += ("当前状态会影响角色对同一句话的感受："
+                       "高压力时更易感到被抛弃/被攻击，高好感时更易感到被认可/被靠近。\n")
+        system_prompt = system_prompt.rstrip() + state_note
     max_attempts = cfg["max_retries"]
     emphases = cfg["retry_emphases"]
     last_error = None

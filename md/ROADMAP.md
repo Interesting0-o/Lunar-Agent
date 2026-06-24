@@ -1,6 +1,6 @@
 # Lunar 状态引擎路线图、执行计划与测试报告
 
-> 2026-06-22 | Surface 重构完成（惯性更新、双向耦合、traits 间接化）
+> 2026-06-23 | 06-23 修复批完成（反馈延迟 / rel_buffer / 级联双向 / 感知状态上下文 / 深度分析测试）
 
 ---
 
@@ -62,14 +62,69 @@
 - 学术参考：Bowlby IWM（对他人表征）、Theory of Mind
 - **状态**：待方案
 
+#### 🟡 问题 10：表面→内部反馈的因果方向是瞬时的（设计局限）✅ 已修复
+
+- 2026-06-23 修复：将 feedback 从同轮即时改为 `surface[t-1] → internal[t]`（延迟版）
+- `_pipeline.py` 中 feedback 计算移至动力学之前，使用 prev_surface 而非当前 surface
+- **状态**：✅ 已修复
+
+#### 🟡 问题 11：双速动力学是参数慢速而非结构慢速 ✅ 已修复
+
+- 2026-06-23 修复：关系态增加显式低通滤波器（`rel_buffer`）
+- `_pipeline.py` 新增 `REL_BUFFER_INTERVAL=3`：关系态每 3 轮更新一次，中间轮次冻结
+- `State` TypedDict 新增 `rel_update_counter` 字段持久化计数
+- **状态**：✅ 已修复
+
+#### 🟡 问题 12：B 矩阵跳过秩检查（skip_rank=True） ✅ 已修复
+
+- 2026-06-23 修复：`tests/test_matrices.py` 新增 `TestMatrixRank`
+- `INPUT_INFLUENCE_B` 非零秩验证 ≥ 6，`REL_INPUT_INFLUENCE_B` 满秩 = 3
+- **状态**：✅ 已修复
+
+#### 🟡 问题 13：关系级联单向（intimacy 成"死胡同"） ✅ 已修复
+
+- 2026-06-23 修复：`_dynamics_weights.py` 新增 intimacy→affection(+0.03) + intimacy→trust_bond(-0.01)
+- intimacy 拓扑从级联终点变为有反馈回路的双向耦合
+- **状态**：✅ 已修复
+
+#### 🟡 问题 14：感知层无状态上下文 ✅ 已修复
+
+- 2026-06-23 修复：`perception.py` 注入 internal/relationship 状态摘要到 prompt
+- `nodes.py` 中 `perception_node` 传递当前状态给感知调用
+- **状态**：✅ 已修复
+
+#### 🟡 问题 15：β_stim 负值 + 截断丢失调制 ✅ 已修复
+
+- 2026-06-23 修复：加性→乘法公式 `β = max(ε, BASE+hyper·GAIN) · (1-deact·0.5)`
+- avoidant 人格的 β 从固定 0.01 恢复为保留 60% 的抑制比例
+- **状态**：✅ 已修复
+
+#### 🟡 问题 16：非对称衰减正负判断错误 ✅ 已修复
+
+- 2026-06-23 修复：`deviation < 0` → `(current < 0) & (deviation < 0)`（双条件）
+- energy/social_battery 等正向维度不再被误加速衰减
+- **状态**：✅ 已修复
+
+#### 🟡 问题 17：vulnerability 输入不足 ✅ 已修复
+
+- 2026-06-23 修复：新增 stress→vulnerability(+0.10) + energy→vulnerability(-0.05)
+- 总输入权重从 0.65 → 0.80
+- **状态**：✅ 已修复
+
+#### 🟡 问题 18：α/α_rel 裁剪边界过紧 ✅ 已修复
+
+- 2026-06-23 修复：α 上界 0.35→0.40, α_rel 上界 0.06→0.08
+- 总截断率从 29% 降至 ~15%（随机人格分布下）
+- **状态**：✅ 已修复
+
 ### 🟢 锦上添花（影响沉浸感）
 
 | 问题 | 内容 | 状态 |
 |------|------|------|
-| 🟢 问题 10 | 无"昼夜节律" | 待方案 |
-| 🟢 问题 11 | 无"个体微习惯" | 待方案 |
-| 🟢 问题 12 | 防御维度待扩展（当前仅 2 维，Vaillant 有 10+ 种） | 方法论文档已写，待扩展 |
-| 🟢 问题 13 | 无"主观时间感" | 待方案 |
+| 🟢 问题 19 | 无"昼夜节律" | 待方案 |
+| 🟢 问题 20 | 无"个体微习惯" | 待方案 |
+| 🟢 问题 21 | 防御维度待扩展（当前仅 2 维，Vaillant 有 10+ 种） | 方法论文档已写，待扩展 |
+| 🟢 问题 22 | 无"主观时间感" | 待方案 |
 
 ---
 
@@ -77,12 +132,19 @@
 
 ### 当前状态与剩余工作
 
-> 截至 2026-06-22，核心数学基础设施已完成：
+> 截至 2026-06-23，核心数学基础设施 + 状态引擎设计缺陷修复已完成：
 > - ✅ 关系维度 6→3 语义合并（方案 A）
 > - ✅ 防御剖面多维输入源（方案 B，实际合并了原多维调制而非独立新变量）
-> - ✅ β 调制系数释放（方案 C）— β 有效范围 [0.01, 0.35]
+> - ✅ β 调制系数释放（方案 C）— β 有效范围 [0.005, 0.35]，乘法公式
 > - ✅ 约束框架完整实现（方案 G）— WeightMapper + WeightVector + LinearMapping + ConstraintRegistry
 > - ✅ 250+ 参数全量迁移（无 origin=legacy 参数）
+> - ✅ 表面反馈因果延迟（#1）
+> - ✅ 双速 rel_buffer（#2）
+> - ✅ B 矩阵秩验证（#3）
+> - ✅ 关系级联双向（#4）
+> - ✅ 感知状态上下文（#5）
+> - ✅ 深度分析测试（20 项）
+> - ✅ α/β 修正 + β_stim 乘法公式 + vulnerability 入边
 
 | 编码 | 方案 | 等级 | 工期 | 依赖 | 状态 |
 |:---:|------|:---:|:----:|:----:|:----:|
@@ -91,15 +153,23 @@
 | **E** | Trait 演化 v1 | **P2** | 5d | D（推荐） | ❌ 待方案 |
 | **F** | 双速 SSM v1 | **P2** | 2w | E | ❌ 待方案 |
 
-### P1（短期优先）
+### P1（短期优先 — 剩余项）
 
 | 方案 | 目标 | 预计改动 | 工期 |
 |------|------|---------|:----:|
 | **H：记忆集成** | `memory_inject_node` + `memory_summery_node` 接入 `graph/_builder.py` | 只需改 `graph/_builder.py`，节点函数已就绪 | **1d** |
 | **D：OCC/刺激扩展** | 不修改 ST_SIZE，在 perception.py 添加评价后处理或扩展维数 | `perception.py`, `config.py` | 3d |
-| **约束⑪修复** | State Formatter 连续化 — 替代当前 5 级离散 `_desc()` | `state_formatter.py` | 2d |
-| **约束②实现** | StimulusMetadata — 置信度/来源编码/衰减调节因子 | `perception.py`, `state.py`, `state_engine/_decay.py` | 2d |
-| **防御剖面权重重构** | 计算路径从裸数组切换到 WeightVector.values | `_defenses.py` 内部 12 组数组引用 | 1d |
+
+### 已完成的 P1 项目（06-23）
+- ✅ **表面反馈因果延迟** — `_pipeline.py` 调用顺序调整
+- ✅ **双速 rel_buffer** — `state.py` + `_pipeline.py` + `nodes.py`
+- ✅ **B 矩阵秩验证** — `test_matrices.py`
+- ✅ **关系级联双向** — `_dynamics_weights.py`
+- ✅ **感知状态上下文** — `perception.py` + `nodes.py`
+- ✅ **α/α_rel 边界放宽** — `_dynamics.py`
+- ✅ **β_stim 乘法公式** — `_dynamics.py`
+- ✅ **非对称衰减修复** — `_decay.py`
+- ✅ **vulnerability 入边增强** — `_surface_weights.py`
 
 ### P2（中期）
 
@@ -122,10 +192,12 @@ delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 
 1. 非线性动力学 / PLRNN — 添加 W·φ(z) 非线性项以支持相变和多稳态
 2. UserModel / UserProfile — 用户心理剖面
-3. State Formatter 连续化 — 替代当前 5 级离散 `_desc()`
-4. 权重外部化 — 所有矩阵参数移至 JSON/YAML 配置
-5. FastAPI 服务化
-6. LLM-as-a-Judge 评估闭环
+3. ~~State Formatter 连续化~~ ✅ **已完成（06-22）**
+4. 权重生成化 Phase 2 — 从"文档化权重（WeightMapper.connect value 硬编码）"升级到"生成化权重（支持 Generator 对象，修改原理参数自动重计算）"
+5. ~~延迟表面反馈~~ ✅ **已完成（06-23）**
+6. ~~双速缓冲区~~ ✅ **已完成（06-23）**
+7. FastAPI 服务化
+8. LLM-as-a-Judge 评估闭环
 
 ### 验收标准
 
@@ -168,29 +240,32 @@ delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 
 ## 三、测试报告（当前快照）
 
-> 2026-06-22 | 230 测试用例全部通过（Surface 惯性+反馈+traits 间接化重构）
+> 2026-06-23 | 264 测试用例全部通过（06-23 修复批：反馈延迟 / rel_buffer / 级联双向 / 感知状态 / 深度分析）
 
 ### 测试概览
 
 | 指标 | 数值 |
 |------|------|
-| 测试文件 | 9 个模块 |
-| 测试用例 | **230**（含 Surface 惯性/反馈测试 22 项 + 34 个对抗式双Agent耦合检验 + 27 个时间衰减监督测试） |
-| 通过率 | 100% (230/230) |
-| 执行时间 | 151s |
+| 测试文件 | 10 个模块（+1 新增 `test_deep_analysis.py`） |
+| 测试用例 | **264**（含 Surface 惯性/反馈测试 22 项 + 深度分析追踪测试 20 项 + 34 个对抗式双Agent耦合检验 + 27 个时间衰减监督测试） |
+| 通过率 | 100% (264/264) |
+| 执行时间 | 173s |
 | 最大单测数据量 | **500,000 组** Monte Carlo |
 | 对抗检验轮数 | 100 组 × 500 轮 + 5 场景 × 1000-1500 轮独立报告 |
 | 总模拟步数 | 约 **200 万** 次管线调用 |
 | 异常发现 | **12 个**（本版新增维度冗余 P0 问题） |
 
-### 本版架构变更
+### 本版架构变更（06-23 修复批）
 
-1. **浪漫张力输入加固**：B 矩阵新增 3 条心理学依据的刺激→张力入边，单轮响应 +48%
-2. **SELF_DECAY 隐性税修复**：统一 0.15 → 每维度独立数组，tax 总值 internal↓22%、relationship↓28%
-3. **跨尺度耦合（内→关）**：`update_relationship_state` 新增 5 条跨尺度耦合规则
-4. **β 逐维度解耦**：`hyper.mean()` 全局标量 → (7,) 逐刺激维度向量，β 有效变动 0.042→0.289
-5. **social_battery 结构性修复**：B 矩阵增补 + 新耦合 + DECAY_TARGETS
-6. **表面层 stress 去放大**：解除 4.5× 放大，fatigue 系数 0.30→0.15
+1. **表面→内部反馈因果延迟**：同轮即时 → `surface[t-1] → internal[t]`，先反馈再动力学
+2. **双速 rel_buffer**：关系态每 3 轮更新一次（`REL_BUFFER_INTERVAL=3`），中间轮次冻结
+3. **关系级联双向**：intimacy 新增→affection(+0.03) + →trust_bond(-0.01) 反馈回路
+4. **感知状态上下文**：internal/relationship 状态摘要注入 perception prompt
+5. **B 矩阵秩验证**：新增 TestMatrixRank 测试（INPUT_INFLUENCE_B 秩≥6, REL 满秩=3）
+6. **非对称衰减**：`deviation < 0` → `(current < 0) & (deviation < 0)` 双条件
+7. **β_stim 乘法公式**：加性 → 乘法 `β = max(ε, BASE+hyper·GAIN) · (1-deact·0.5)`
+8. **α/α_rel 边界放宽**：α [0.02,0.35]→[0.05,0.40], α_rel [0.005,0.06]→[0.005,0.08]
+9. **vulnerability 入边增强**：新增 stress(+0.10) + energy(-0.05)
 
 ### 异常值清单
 
@@ -246,15 +321,18 @@ delta[T_PRIDE] += (deact_avg - 0.5) * 0.01  # 持续高去激活→骄傲↑
 | 优先级 | 数量 | 问题 |
 |:------:|:----:|------|
 | 🔴 P0 | 1 | 维度冗余：14 维仅 6 维有效自由度 |
-| 🟡 P1 | 4 | 往返迟滞，震荡慢衰减，关系态渐近残余，单刺激影响不均衡 |
-| 🟢 P2 | 4 | vulnerability 触底 5%，剖面可达极值有限，expressiveness 压缩，内部态渐近残余 |
+| 🟡 P1 | 1 | 时间衰减渐近残余（影响：🟢 实际 <5%） |
+| 🟢 待实施 | 5 | 记忆集成 / OCC 刺激扩展 / Trait 演化 / 权重生成化 / FastAPI |
 | ℹ️ 文档化 | 2 | soft_clamp 过渡区，sigmoid 浮点饱和 |
 
 ### 运行测试
 
 ```bash
-# 全部测试（230 用例）
+# 全部测试（264 用例）
 uv run pytest tests/ -v
+
+# 深度分析追踪测试（20 项，带 -s 查看追踪数据）
+uv run pytest tests/test_deep_analysis.py -v -s
 
 # 异常探测（含维度分析）
 uv run pytest tests/test_anomalies.py -v -s
@@ -327,3 +405,18 @@ uv run pytest tests/test_decay.py -v -k "not TestVisualization"
 | **动力学 α/β/setpoint/耦合/自阻尼 全部迁移** | **06-21** |
 | **防御剖面 deact/hyper 基线 + sigmoid + apply 增益迁移** | **06-21** |
 | **衰减 λ/时间曲线/人格调制 全部迁移** | **06-21** |
+
+### 06-23 修复批 ✅
+
+| 项目 | 文件 | 类型 |
+|------|------|:----:|
+| 非对称衰减正负判断 | `_decay.py` | 公式修复 |
+| α/α_rel 边界放宽 | `_dynamics.py` | 参数修正 |
+| β_stim 乘法公式 | `_dynamics.py` | 公式重构 |
+| vulnerability 入边增强 | `_surface_weights.py` | 参数修正 |
+| 表面→内部反馈因果延迟 | `_pipeline.py` | 结构重排 |
+| 双速 rel_buffer | `_pipeline.py` + `nodes.py` + `state.py` | 新功能 |
+| B 矩阵秩验证 | `test_matrices.py` | 测试增强 |
+| 关系级联双向 | `_dynamics_weights.py` | 参数修正 |
+| 感知状态上下文 | `perception.py` + `nodes.py` | 新功能 |
+| 深度分析测试 | `test_deep_analysis.py` | 新测试模块 |

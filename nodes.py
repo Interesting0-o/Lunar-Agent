@@ -92,7 +92,16 @@ def perception_node(state: State) -> dict:
     """
     cfg = PERCEPTION_CONFIG
     context = extract_recent_context(state["messages"], cfg["context_window"])
-    result = call_perception_with_retry(context, cfg)
+
+    # 注入状态上下文（辅助感知判断）
+    internal_state = _ensure_array(state.get("internal_state"))
+    relationship_state = _ensure_array(state.get("relationship_state"))
+
+    result = call_perception_with_retry(
+        context, cfg,
+        internal_state=internal_state,
+        relationship_state=relationship_state,
+    )
 
     if result is None:
         return {"error": True}
@@ -107,19 +116,34 @@ def perception_node(state: State) -> dict:
 def state_engine_node(state: State) -> dict:
     """状态引擎节点：根据感知输出的心理刺激 + 当前状态 + Traits 更新所有状态层。
 
-    读取 state 中的 user_stimuli 后将其置为 None，避免 checkpoint 残留。
-    同时读取并传递 stimulus_metadata（约束②）。
+    流程：
+      1. 从 checkpoint 加载持久化数据（decay_modulator, 时间戳）
+      2. 用新轮的 stimulus_metadata 更新 decay_modulator（约束②）
+      3. 计算自上次更新以来的 Δt，应用时间衰减（_decay.py）
+      4. 用衰减后的状态 + 用户刺激运行 update_all
+      5. 持久化衰减调制因子 + 新时间戳，清理临时字段（user_stimuli）
     """
     if state.get("error"):
         logger.info("state_engine 跳过本轮（perception 已标记 error）")
         return {}
 
+    import time as _time
+    from state_engine import apply_time_decay
+
     # ── 确保所有数值状态为 numpy 数组（兼容 json/list 反序列化） ──
     traits = _ensure_array(state.get("traits"))
     stimuli = _ensure_array(state.get("user_stimuli"))
 
-    # ── 重建 StimulusMetadata（从 dict → dataclass，约束②） ──
+    internal = _ensure_array(state.get("internal_state"))
+    relationship = _ensure_array(state.get("relationship_state"))
+    prev_surface = _ensure_array(state.get("surface_state"))
+
+    # ── 加载持久化衰减调制因子 ──
+    persistent_modulator = _ensure_array(state.get("current_decay_modulator"))
+
+    # ── 重建 StimulusMetadata & 合并 decay_modulator ──
     meta_dict = state.get("stimulus_metadata")
+    new_modulator = None
     if meta_dict is not None and isinstance(meta_dict, dict):
         from state import StimulusMetadata
         metadata = StimulusMetadata(
@@ -128,19 +152,52 @@ def state_engine_node(state: State) -> dict:
             decay_modulator=np.asarray(meta_dict["decay_modulator"], dtype=np.float64),
             timestamp=float(meta_dict.get("timestamp", 0.0)),
         )
-    else:
-        metadata = None
+        new_modulator = metadata.decay_modulator
 
+    # ── 更新持久化衰减调制因子（EWMA 平滑，防止单轮剧烈波动） ──
+    if new_modulator is not None:
+        if persistent_modulator is None:
+            persistent_modulator = new_modulator.copy()
+        else:
+            # 指数加权移动平均：新轮贡献 30%，历史贡献 70%
+            persistent_modulator = 0.7 * persistent_modulator + 0.3 * new_modulator
+        persistent_modulator = np.clip(persistent_modulator, 0.1, 2.0)
+
+    # ── 计算自上次更新以来的 Δt ──
+    last_ts = state.get("last_update_timestamp")
+    now = _time.time()
+    delta_hours = 0.0
+    if last_ts is not None:
+        delta_hours = max(0.0, (now - last_ts) / 3600.0)
+
+    # ── 时间衰减（仅在有间隔时生效，max 24 小时防止数值溢出） ──
+    if delta_hours > 0.01 and internal is not None and relationship is not None:
+        decayed = apply_time_decay(
+            internal, relationship, traits,
+            delta_hours=min(delta_hours, 24.0),
+            decay_modulator=persistent_modulator,
+        )
+        internal = decayed["internal_state"]
+        relationship = decayed["relationship_state"]
+
+    # ── 双速动力学计数器（关系态每 REL_BUFFER_INTERVAL 轮更新一次） ──
+    rel_counter = state.get("rel_update_counter") or 0
+
+    # ── 运行主引擎（用衰减后的状态） ──
     result = update_all(
-        current_internal=_ensure_array(state.get("internal_state")),
-        current_relationship=_ensure_array(state.get("relationship_state")),
+        current_internal=internal,
+        current_relationship=relationship,
         traits=traits,
         stimuli=stimuli,
-        prev_surface=_ensure_array(state.get("surface_state")),
-        stimulus_metadata=metadata,
+        prev_surface=prev_surface,
+        stimulus_metadata=metadata if meta_dict is not None else None,
+        delta_hours=delta_hours,
+        rel_counter=rel_counter,
     )
 
-    # 消费后清理中间数据，避免 checkpoint 残留
+    # ── 持久化衰减调制因子和时间戳，清理临时字段 ──
+    result["current_decay_modulator"] = persistent_modulator
+    result["last_update_timestamp"] = now
     result["user_stimuli"] = None
     result["stimulus_metadata"] = None
 

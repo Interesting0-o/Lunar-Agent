@@ -6,6 +6,8 @@ dist/
 wheels/
 *.egg-info
 langgraph.json
+.pytest_cache/
+.tmp
 
 # Virtual environments
 .venv

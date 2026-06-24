@@ -121,15 +121,21 @@ I_LABEL_IDX = {k: i for i, k in enumerate(I_LABELS)}
 # AI 与用户之间的互动累积感知。
 #
 # 合并说明（2026-06-21）:
-#   R_TRUST_BOND = trust + emotional_safety（信任+情感安全→信任纽带）
-#   R_INTIMACY   = familiarity + dependency + romantic_tension（熟悉+依赖+张力→亲密）
+#   原 6 维：[affection, trust, emotional_safety, familiarity, dependency, romantic_tension]
+#   → 合并为 3 维：
+#     R_AFFECTION = affection（保留原语义，无合并）
+#     R_TRUST_BOND = trust + emotional_safety（信任+情感安全→信任纽带）
+#     R_INTIMACY   = familiarity + dependency + romantic_tension（熟悉+依赖+张力→亲密）
 # 合并理由: 原 6 维中 trust×safety r≈0.6, fam×dep×tens r≈0.98+，
-#          但 B 矩阵密度 52.4% 无法通过约束⑥（≤30%），改用显式命名规则后自动稀疏。
+#           且 B 矩阵密度 52.4% 无法通过约束⑥（≤30%），合并后密度自然降至 28.6%。
+#
+# _dynamics.py 和 _matrices.py 中通过 `from state import R_LABELS` 引用这些标签，
+# 所有矩阵构造依赖 R_LABELS 的顺序——修改此顺序将静默破坏现有矩阵。
 # ═══════════════════════════════════════════════════════════════
 
-R_AFFECTION = 0            # 好感度（-1=厌恶, 0=中性, +1=喜爱）- 保留原语义
-R_TRUST_BOND = 1           # 信任纽带（-1=怀疑, 0=中性, +1=安全）- trust+safety 合并
-R_INTIMACY = 2             # 亲密张力（-1=疏离, 0=中性, +1=亲密）- fam+dep+tension 合并
+R_AFFECTION = 0            # 好感度（-1=厌恶, 0=中性, +1=喜爱）
+R_TRUST_BOND = 1           # 信任纽带（-1=怀疑, 0=中性, +1=安全）
+R_INTIMACY = 2             # 亲密张力（-1=疏离, 0=中性, +1=亲密）
 R_SIZE = 3
 
 R_LABELS = [
@@ -284,7 +290,16 @@ class State(TypedDict):
 
     # ── 感知节点输出（perception_node 写入，state_engine_node 消费后置为 None） ──
     user_stimuli: Optional[_Array]
-    stimulus_metadata: Optional[dict]  # StimulusMetadata 的 JSON 兼容表示
+    stimulus_metadata: Optional[dict]  # StimulusMetadata 的 JSON 兼容表示（每轮临时的）
+
+    # ── 持久化衰减调制因子（从 stimulus_metadata 提取，跨轮保持） ──
+    current_decay_modulator: Optional[_Array]  # (7,) [0,1] 衰减调制因子
+
+    # ── 时间戳：上次状态引擎更新时间（用于计算 Δt） ──
+    last_update_timestamp: Optional[float]
+
+    # ── 双速动力学：关系态更新计数器（rel_buffer） ──
+    rel_update_counter: Optional[int]     # 每 N 轮更新一次关系态，N=3
 
     # ── 状态格式化输出（state_formatter_node 写入，llm_node 消费） ──
     state_description: Optional[str]

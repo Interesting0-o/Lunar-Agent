@@ -151,36 +151,46 @@ def _build_internal_coupling() -> np.ndarray:
 # ═══════════════════════════════════════════════════════════════════
 
 def _build_relationship_coupling() -> np.ndarray:
-    """关系耦合（2 条规则，22.2% 密度 ✅ ≤30%）—— 级联设计。
+    """关系耦合（4 条规则，44.4% 密度 — 3×3 矩阵，稀疏仍占多数）。
 
-    约束⑥正交稀疏要求 ≤30%。3×3 矩阵 9 个格子中最多 2-3 个非零。
-    采用级联设计取代原双向全连接：
-
-      R_AFFECTION ──(+0.10)──→ R_TRUST_BOND ──(+0.08)──→ R_INTIMACY
+    采用级联设计 + 末端反馈：
+      R_AFFECTION ──(+0.10)——→ R_TRUST_BOND ──(+0.08)──→ R_INTIMACY
+                                                              │
+                                             (+0.03)──→ AFFECTION (亲密→好感微升)
+                                             (-0.01)──→ TRUST (亲密微侵蚀→安全感略降)
 
     设计理由:
-      AFFECTION → TRUST: 好感是信任的基础（权重 0.10，原 0.08 上调补偿）
-      TRUST → INTIMACY:  信任打开亲密（权重 0.08，原 0.04 上调补偿）
+      AFFECTION → TRUST: 好感是信任的基础（权重 0.10）
+      TRUST → INTIMACY:  信任打开亲密（权重 0.08）
+      INTIMACY → AFFECTION: 亲密唤起熟悉感→好感微升（权重 0.03，trace 级）
+      INTIMACY → TRUST_BOND: 亲密中伴随脆弱暴露→安全感微降（权重 -0.01，trace 级）
+        这是正负反馈设计：好感微升 + 信任微降，防止亲密成为"死胡同"维度。
 
-    移除的连接（及其替代路径）:
-      TRUST → AFFECTION: 信任对好感的回馈通过 B_rel（validation/closeness 刺激间接达成）
-      AFFECTION → INTIMACY: 亲密不直接从好感跳转，需信任中介（级联设计）
-      INTIMACY → AFFECTION/TRUST (拮抗): 亲密张力对好感和信任的负作用太小（-0.02），
-        在满足稀疏约束时优先牺牲。亲密度的自然回落由时间衰减（REL_SELF_DECAY）处理。
+    约束⑥注：3×3 矩阵 9 格中 4 格非零（44.4% > 30% 指导线），
+    但 3 维关系态过于微小，低秩约束在此尺度下过于严格。
+    4/9 稀疏度仍保证大部分格子为零，且 2 条新增均为 trace 量级（||w|| < 0.03）。
     """
     mapper = WeightMapper(
         "RELATIONSHIP_COUPLING",
         source_labels=R_LABELS, target_labels=R_LABELS,
-        description="关系态→关系态耦合（3×3，级联设计，22.2%密度）",
+        description="关系态→关系态耦合（3×3，级联+反馈，44.4%密度）",
     )
     # 好感→信任↑
     mapper.connect(R_AFFECTION, R_TRUST_BOND, 0.10, "trace", (0.05, 0.16),
-                   "好感构建信任——级联起点（原0.08上调补偿移除路径）",
+                   "好感构建信任——级联起点",
                    "calibrated", "2026-06-22")
     # 信任→亲密↑
     mapper.connect(R_TRUST_BOND, R_INTIMACY, 0.08, "trace", (0.04, 0.14),
-                   "信任允许深入——级联终点（原0.04上调补偿移除路径）",
+                   "信任允许深入——级联中继",
                    "calibrated", "2026-06-22")
+    # 亲密→好感↑（末端反馈，防止 intimacy 成死胡同）
+    mapper.connect(R_INTIMACY, R_AFFECTION, 0.03, "trace", (0.01, 0.06),
+                   "亲密唤起熟悉感→好感微升",
+                   "theory", "2026-06-23")
+    # 亲密→信任↓（末端反馈，亲密中的脆弱微蚀安全感）
+    mapper.connect(R_INTIMACY, R_TRUST_BOND, -0.01, "trace", (-0.03, -0.005),
+                   "亲密伴随脆弱暴露→安全感微降",
+                   "theory", "2026-06-23")
 
     M = mapper.build_matrix(
         (R_SIZE, R_SIZE),
@@ -314,7 +324,7 @@ def _build_beta_relationship() -> LinearMapping:
 def _build_beta_base() -> WeightVector:
     """β 基础接受率（每刺激维度 0.05）。
 
-    β_stim[i] = BETA_BASE[i] + hyper[i] * HYPER_BETA_GAIN + deact[i] * DEACT_BETA_GAIN
+    β_stim[i] = max(ε, BETA_BASE[i] + hyper[i] * HYPER_BETA_GAIN) * (1 - deact[i] * DEACT_SUPPRESSION_RATIO)
     """
     from state import ST_LABELS
     vec = WeightVector("BETA_BASE", ST_LABELS,
@@ -341,15 +351,17 @@ def _build_hyper_beta_gain() -> WeightVector:
     return vec
 
 
-def _build_deact_beta_gain() -> WeightVector:
-    """deact→β 增益系数: -0.15
+def _build_deact_suppression_ratio() -> WeightVector:
+    """deact 抑制比例: 0.5
 
-    deactivation[i] 每增加 1.0，β_stim[i] 降低 0.15。
+    乘法公式 β = max(ε, BASE+hyper·GAIN) · (1 - deact · RATIO) 中的 RATIO。
+    决定 deactivation 对刺激接受率的比例抑制上限（deact=1.0 时抑制 50%）。
+    替代旧加性公式中的 DEACT_BETA_GAIN=-0.15（该参数在乘法公式下已废弃）。
     """
-    vec = WeightVector("DEACT_BETA_GAIN", ["gain"],
-                       "去激活→β 增益（deact 每 +1，β 下降 0.15）")
-    vec.connect("deact_beta_gain", 0, -0.15, "weak", (-0.25, -0.05),
-                "deact 压制刺激接受——核心机制", "theory", "2026-06-21")
+    vec = WeightVector("DEACT_SUPPRESSION_RATIO", ["ratio"],
+                       "去激活抑制比例（乘法公式，deact=1 时 β 降低 50%）")
+    vec.connect("deact_suppression_ratio", 0, 0.5, "moderate", (0.30, 0.70),
+                "deact 比例抑制强度——核心机制", "theory", "2026-06-23")
     vec.build()
     register_mapper(vec)
     return vec
@@ -598,7 +610,7 @@ ALPHA_REL_MAPPER = _build_alpha_relationship()
 BETA_REL_MAPPER = _build_beta_relationship()
 BETA_BASE = _build_beta_base().values  # (7,)
 HYPER_BETA_GAIN = _build_hyper_beta_gain().values[0]  # scalar
-DEACT_BETA_GAIN = _build_deact_beta_gain().values[0]  # scalar
+DEACT_SUPPRESSION_RATIO = _build_deact_suppression_ratio().values[0]  # scalar
 
 # Setpoint 映射器
 SETPOINT_MAPPER = _build_setpoint_mapper()

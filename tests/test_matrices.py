@@ -108,3 +108,24 @@ class TestCouplingContractivity:
         # 孤独→思念：正
         assert INTERNAL_COUPLING[I_LONELINESS, I_LONGING] > 0, \
             "loneliness→longing 应为正"
+
+
+class TestMatrixRank:
+    """B 矩阵秩验证 — 确保输入映射矩阵非退化。"""
+
+    def test_input_influence_b_rank(self):
+        """INPUT_INFLUENCE_B (7x8) 的秩应 >= 6（满秩 = 7）。"""
+        import numpy as np
+        from state_engine._matrices import INPUT_INFLUENCE_B
+        rank = np.linalg.matrix_rank(INPUT_INFLUENCE_B)
+        min_exp = min(INPUT_INFLUENCE_B.shape) - 1
+        assert rank >= min_exp, \
+            f"INPUT_INFLUENCE_B 秩={rank}, 期望>={min_exp}，矩阵可能退化"
+
+    def test_rel_input_influence_b_rank(self):
+        """REL_INPUT_INFLUENCE_B (7x3) 的秩应 = 3（满秩）。"""
+        import numpy as np
+        from state_engine._matrices import REL_INPUT_INFLUENCE_B
+        rank = np.linalg.matrix_rank(REL_INPUT_INFLUENCE_B)
+        assert rank == 3, \
+            f"REL_INPUT_INFLUENCE_B 秩={rank}, 期望 =3，关系刺激签名可能重叠"

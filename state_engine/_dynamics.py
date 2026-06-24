@@ -15,7 +15,11 @@
   - 所有参数带完整 provenance
 """
 
+import logging
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
 from state import (
     I_ENERGY, I_STRESS, I_LONELINESS, I_INSECURITY,
     I_IRRITATION, I_LONGING, I_SOCIAL_BATTERY, I_MENTAL_FATIGUE,
@@ -27,7 +31,7 @@ from ._dynamics_weights import (
     SELF_DECAY, DECAY_TARGETS, REL_SELF_DECAY,
     INTERNAL_COUPLING, RELATIONSHIP_COUPLING, CROSS_SCALE_COUPLING,
     ALPHA_MAPPER, ALPHA_REL_MAPPER, BETA_REL_MAPPER,
-    BETA_BASE, HYPER_BETA_GAIN, DEACT_BETA_GAIN,
+    BETA_BASE, HYPER_BETA_GAIN, DEACT_SUPPRESSION_RATIO,
     SETPOINT_MAPPER, REL_SETPOINT_MAPPER,
 )
 
@@ -79,13 +83,23 @@ def update_internal_state(
     # ── α: 跨维度耦合速率 ──
     # 由 ALPHA_MAPPER(LinearMapping) 计算，带完整 provenance。
     alpha = ALPHA_MAPPER.compute(np.concatenate([traits, relationship]))[0]
-    alpha = soft_clamp(alpha, 0.02, 0.35)
+    if alpha < 0.05 or alpha > 0.40:
+        logger.warning("ALPHA_MAPPER 输出 %.4f 被截断到 [0.05, 0.40]", alpha)
+    alpha = soft_clamp(alpha, 0.05, 0.40)
 
-    # ── β: 刺激接受速率（逐刺激维度）──
-    # β_base + hyper * hyper_gain + deact * deact_gain
-    # 所有系数来自 _dynamics_weights.py（WeightVector 带 provenance）
-    beta_stim = BETA_BASE + hyper * HYPER_BETA_GAIN + deact * DEACT_BETA_GAIN
-    beta_stim = np.clip(beta_stim, 0.01, 0.35)
+    # ── β: 刺激接受速率（逐刺激维度，乘法调制）──
+    # β = max(ε, BASE + hyper·GAIN) · (1 - deact · DEACT_SUPPRESSION_RATIO)
+    # 乘法公式替代旧加性公式 β = BASE + hyper·0.35 + deact·(-0.15)。
+    # 旧公式在 deact≥0.4+hyper≤0.2 时产生负值（逆转刺激方向），
+    # 通过 np.maximum(β, 0.01) 截断后丢失 deact 的抑制梯度。
+    # 乘法公式保证 deact 按比例抑制（非加性抵消），保留调制区分度。
+    # DEACT_SUPPRESSION_RATIO=0.5 表示 deact=1.0 时 β 降低 50%。
+    beta_raw = np.maximum(BETA_BASE + hyper * HYPER_BETA_GAIN, 0.005)
+    beta_stim = beta_raw * (1.0 - deact * DEACT_SUPPRESSION_RATIO)
+    if np.any(beta_stim < 0.005) or np.any(beta_stim > 0.35):
+        logger.warning("BETA_STIM 极值 %.4f~%.4f 被截断到 [0.005, 0.35]",
+                       beta_stim.min(), beta_stim.max())
+    beta_stim = np.clip(beta_stim, 0.005, 0.35)
 
     # ── Δ_coupling: 跨维度耦合 + 每维度自阻尼 ──
     # 耦合矩阵通过 WeightMapper 构建（_dynamics_weights.py），带完整 provenance。
@@ -121,11 +135,15 @@ def update_relationship_state(
     # ── α_rel: 关系跨维度耦合速率 ──
     # 由 ALPHA_REL_MAPPER(LinearMapping) 计算，带完整 provenance。
     alpha = ALPHA_REL_MAPPER.compute(np.concatenate([traits, current]))[0]
-    alpha = soft_clamp(alpha, 0.005, 0.06)
+    if alpha < 0.005 or alpha > 0.08:
+        logger.warning("ALPHA_REL_MAPPER 输出 %.4f 被截断到 [0.005, 0.08]", alpha)
+    alpha = soft_clamp(alpha, 0.005, 0.08)
 
     # ── β_rel: 关系刺激接受速率 ──
     # 由 BETA_REL_MAPPER(LinearMapping) 计算，带完整 provenance。
     beta = BETA_REL_MAPPER.compute(traits)[0]
+    if beta < 0.002 or beta > 0.06:
+        logger.warning("BETA_REL_MAPPER 输出 %.4f 被截断到 [0.002, 0.06]", beta)
     beta = soft_clamp(beta, 0.002, 0.06)
 
     # ── Δ_coupling: 关系耦合 + 自阻尼 + 跨尺度 ──
